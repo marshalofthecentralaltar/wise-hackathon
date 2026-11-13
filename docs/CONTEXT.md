@@ -68,7 +68,7 @@ The drawings at https://claude.ai/artifact/3qLwbjNP7LEtCRZNCZe7mD were made befo
 | Real service | Claude and Claude Code | Claude groups the reports and gives the verdict. Claude Code investigates and writes the fix |
 | Real service | Prometheus | Reads the card app every 15 seconds. Its own graph page is the monitoring screen on stage |
 | Real | The card app's logs | One line per request, written by the running app |
-| Real service | A host that redeploys on merge | The card app goes live again after the approval |
+| Real | Deploy on merge | The card app runs on the demo laptop. A small watcher pulls `main` when the merge lands and restarts it |
 | Stand-in | The card app | Three pages we write. It stands in for a product |
 | Stand-in | The owners file | Stands in for a company's map from web path to service to team |
 | Stand-in | The three of us on phones | We type as support agents passing on what customers said |
