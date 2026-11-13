@@ -213,6 +213,24 @@ describe('runFullCase: the starting state reads monitoring the way the tool will
     expect(relaxed.monitoringSource).toBe('metrics-endpoint');
   });
 
+  it('--require-prometheus: the tool\'s own step 3 reading from /metrics during the run fails it; the line names the source', async () => {
+    const timings = (src?: 'prometheus' | 'metrics-endpoint') => async () => ({ groupId: 'group-1', startedAt: 'x', secondsByStep: {}, totalSeconds: 40, ...(src ? { monitoringSource: src } : {}) });
+    const fellBack = await runFullCase(world('amount', { requirePrometheus: true, timingsSince: timings('metrics-endpoint') }).deps);
+    expect(fellBack.ok).toBe(false);
+    expect(fellBack.monitoringSource).toBe('prometheus');
+    expect(fellBack.runMonitoringSource).toBe('metrics-endpoint');
+    expect(fellBack.failed.join(' ')).toMatch(/the tool's own monitoring step read metrics-endpoint, not prometheus/);
+    const unrecorded = await runFullCase(world('amount', { requirePrometheus: true, timingsSince: timings() }).deps);
+    expect(unrecorded.ok).toBe(false);
+    expect(unrecorded.failed.join(' ')).toMatch(/read no recorded source, not prometheus/);
+    const good = await runFullCase(world('amount', { requirePrometheus: true, timingsSince: timings('prometheus') }).deps);
+    expect(good.ok).toBe(true);
+    expect(good.runMonitoringSource).toBe('prometheus');
+    const relaxed = await runFullCase(world('amount', { timingsSince: timings('metrics-endpoint') }).deps);
+    expect(relaxed.ok).toBe(true);
+    expect(relaxed.runMonitoringSource).toBe('metrics-endpoint');
+  });
+
   it('a tool that does not start: the run fails with the reason and posts nothing', async () => {
     const w = world('amount', { startTool: async () => { throw new Error('no "Listening in" line within 60 s'); } });
     const line = await runFullCase(w.deps);

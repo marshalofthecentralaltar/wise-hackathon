@@ -134,6 +134,8 @@ export interface FullRunLine {
   monitoring: string | null;
   /** Where the starting-state monitoring came from (step 3's source); null when it was not read. */
   monitoringSource: MonitoringFinding['source'] | null;
+  /** Where the tool's own step 3 read monitoring during the run (from its RunTimings line); null when not recorded. */
+  runMonitoringSource: MonitoringFinding['source'] | null;
   /** After a merge: 'checked' when the browser check ran on the redeployed page; otherwise why not. */
   pageCheck: string | null;
   /** The log file of the tool this run started as its own process (--via slack); null otherwise. */
@@ -170,6 +172,7 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
     timings: null,
     monitoring: null,
     monitoringSource: null,
+    runMonitoringSource: null,
     pageCheck: null,
     toolLog: null,
     toolPid: null,
@@ -320,6 +323,9 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
 
   line.timings = await d.timingsSince(startedIso);
   if (!line.timings) fail('no RunTimings line for this run in tool/.state/timings.jsonl');
+  line.runMonitoringSource = line.timings?.monitoringSource ?? null;
+  if (d.requirePrometheus && line.timings && line.runMonitoringSource !== 'prometheus')
+    fail(`the tool's own monitoring step read ${line.runMonitoringSource ?? 'no recorded source'}, not prometheus (--require-prometheus)`);
 
   // 6. What the case requires.
   if (d.problem === 'flicker') {

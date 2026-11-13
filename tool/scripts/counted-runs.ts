@@ -1,4 +1,5 @@
-// npm run counted-runs -- --flicker <n> --amount <m> [--via slack|direct] [--require-prometheus] [--tool own|external] [--no-deploy-check]
+// npm run counted-runs -- --flicker <n> --amount <m> [--via slack|direct] [--require-prometheus] [--tool own|external]
+// (--no-deploy-check is refused with exit 2: a counted flicker run must have its redeployed page checked.)
 // Runs full-run n + m times in a row, the flicker runs first (each with --approve), each from the
 // reset (full-run makes it). Never stops early: a failed run is recorded and the next one starts.
 // Every line goes to tool/artifacts/counted-runs-<UTC stamp>.jsonl as it comes; at the end
@@ -7,7 +8,7 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { summarizeRuns, type CountedLine } from '../src/countedRuns.js';
+import { countsOk, notCountedReason, summarizeRuns, type CountedLine } from '../src/countedRuns.js';
 import type { Problem } from '../src/fullRun.js';
 import { ARTIFACTS_DIR, TOOL_DIR, TSX_CLI, fileStamp } from './lib/procs.js';
 import { SECRETS_FILE } from './lib/secretsLine.js';
@@ -19,13 +20,16 @@ const arg = (name: string, fallback?: string) => {
 const flickerN = Number(arg('flicker', '0'));
 const amountN = Number(arg('amount', '0'));
 const via = arg('via', 'slack');
+if (process.argv.includes('--no-deploy-check')) {
+  console.error('counted-runs does not take --no-deploy-check: a counted flicker run is ok only when the redeployed page was checked. Run full-run on its own to skip that check.');
+  process.exit(2);
+}
 const passOn = [
   ...(process.argv.includes('--require-prometheus') ? ['--require-prometheus'] : []),
-  ...(process.argv.includes('--no-deploy-check') ? ['--no-deploy-check'] : []),
   ...(arg('tool') ? ['--tool', arg('tool')!] : []),
 ];
 if (!Number.isInteger(flickerN) || !Number.isInteger(amountN) || flickerN < 0 || amountN < 0 || flickerN + amountN === 0 || (via !== 'slack' && via !== 'direct')) {
-  console.error('usage: counted-runs.ts --flicker <n> --amount <m> [--via slack|direct] [--require-prometheus] [--tool own|external] [--no-deploy-check]');
+  console.error('usage: counted-runs.ts --flicker <n> --amount <m> [--via slack|direct] [--require-prometheus] [--tool own|external]');
   process.exit(2);
 }
 
@@ -68,9 +72,9 @@ for (const [i, problem] of plan.entries()) {
   lines.push(line);
   appendFileSync(jsonl, `${JSON.stringify(line)}\n`);
   console.log(JSON.stringify(line));
-  say(`run ${i + 1} (${problem}): ${line.ok ? 'ok' : `FAILED: ${line.failed.join('; ')}`} in ${Math.round((performance.now() - t0) / 1000)} s`);
+  say(`run ${i + 1} (${problem}): ${countsOk(line) ? 'ok' : `FAILED: ${line.ok ? notCountedReason(line) : line.failed.join('; ')}`} in ${Math.round((performance.now() - t0) / 1000)} s`);
 }
 writeFileSync(md, summarizeRuns(lines, { title: `Counted runs ${stamp}`, command }));
 say(`summary: ${md}`);
 for (const p of ['flicker', 'amount'] as const) if (plan.includes(p)) say(summarizeRuns(lines).split('\n').find((l) => l.startsWith(`${p}:`)) ?? '');
-process.exit(lines.every((l) => l.ok) ? 0 : 1);
+process.exit(lines.every(countsOk) ? 0 : 1);
