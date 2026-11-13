@@ -1,0 +1,8 @@
+groups:
+  - name: card-app
+    rules:
+      - alert: CardPageErrors
+        expr: sum(rate(http_requests_total{path="/card",status=~"5.."}[1m])) > 0
+        for: 30s
+        labels:
+          page: card
