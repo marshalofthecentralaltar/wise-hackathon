@@ -1,8 +1,8 @@
-# Wise hackathon: from a customer's report to a pull request
+# Wise hackathon: from customer reports to a fix or a handoff
 
-A tool for support and development teams. It reads customer reports in a Slack channel, groups the ones about the same small problem, checks that monitoring shows nothing, finds the owning team and the recent change behind the problem, has Claude Code write a fix, opens a pull request, and gives support one sentence to tell the customers.
+A tool for support and development teams. It reads customer reports in a Slack channel and notices when several are about the same problem. It checks monitoring and logs, reads the recent changes, finds the owning team, and investigates in the code until it can name the commit responsible. A low-severity problem it fixes and offers for approval. A high-severity problem it does not touch; it hands the team a written account of what it found.
 
-Status on 13 November 2026, 17:30 UTC: nothing is built. This repository holds the context and the issues.
+Status on 13 November 2026, 17:45 UTC: nothing is built. This repository holds the context and the issues.
 
 ## Where to start
 
