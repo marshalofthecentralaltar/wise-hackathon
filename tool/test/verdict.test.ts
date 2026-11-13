@@ -34,6 +34,16 @@ describe('judge: the written rules, in order', () => {
     expect(v.reason).toMatch(/Monitoring/);
   });
 
+  it('monitoring that could not be read is high by rule, even when everything else says appearance', async () => {
+    const unavailable: MonitoringFinding = { ...healthy, showsProblem: false, unavailable: true, summary: 'Neither Prometheus nor /metrics answered.' };
+    const v = await judge({ group, monitoring: unavailable, investigation: found('appearance'), textEffect: 'appearance' });
+    expect(v).toMatchObject({ severity: 'high', decidedBy: 'rule' });
+    expect(v.reason).toMatch(/health is unknown/);
+    // The same input with monitoring readable is low: the rule alone made the difference.
+    const readable = await judge({ group, monitoring: { ...unavailable, unavailable: false }, investigation: found('appearance'), textEffect: 'appearance' });
+    expect(readable.severity).toBe('low');
+  });
+
   it('no responsible commit is high, even when both effects say appearance', async () => {
     const v = await judge({ group, monitoring: healthy, investigation: notFound, textEffect: 'appearance' });
     expect(v).toMatchObject({ severity: 'high', decidedBy: 'rule' });
