@@ -33,7 +33,8 @@ import { webSlackPort } from '../src/slackPost.js';
 import { startTool, type RunningTool } from '../src/startTool.js';
 import { ghApi, spawnTool } from '../src/steps/exec.js';
 import { checkMonitoring } from '../src/steps/monitoring.js';
-import { ARTIFACTS_DIR, fileStamp, startToolProcess, stopTree, type Started } from './lib/procs.js';
+import { ARTIFACTS_DIR, fileStamp, isAlive, startToolProcess, stopTree, type Started } from './lib/procs.js';
+import { readRecord } from './lib/demo.js';
 import { join } from 'node:path';
 import type { RunTimings } from '../src/types.js';
 import { SECRETS_FILE, emptyTestTokenMessage } from './lib/secretsLine.js';
@@ -154,6 +155,9 @@ const deps: FullRunDeps = {
       return;
     }
     if (toolMode === 'external') return;
+    // Two tools on one Slack app split the events between them.
+    const demoTool = readRecord()?.toolPid;
+    if (demoTool && isAlive(demoTool)) throw new Error(`a tool started by demo-start --with-tool is running (pid ${demoTool}); run with --tool external, or start the demo without --with-tool`);
     const toolLog = join(ARTIFACTS_DIR, `tool-${fileStamp()}-${problem}.log`);
     log(`starting the tool as its own process; log ${toolLog}`);
     toolProcess = await startToolProcess({ log: toolLog });
