@@ -168,4 +168,6 @@ export interface RunTimings {
   startedAt: string;
   secondsByStep: Partial<Record<'pattern' | 'monitoring' | 'changes' | 'owner' | 'investigation' | 'verdict' | 'fix' | 'handoff' | 'post', number>>;
   totalSeconds: number;
+  /** Where step 3's monitoring reading came from; absent when step 3 did not finish. */
+  monitoringSource?: 'prometheus' | 'metrics-endpoint';
 }

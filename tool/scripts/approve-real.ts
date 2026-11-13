@@ -6,7 +6,7 @@
 //                         #support thread <ts>, owner = the bot itself (no person is pinged), for a
 //                         person to press while `npm run tool` listens.
 // Run from tool/:
-//   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/approve-real.ts --merge-proof
+//   npx tsx --import ./src/loadSecrets.ts scripts/approve-real.ts --merge-proof
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

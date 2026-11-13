@@ -7,6 +7,7 @@ import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { killTree, run } from './fix.js';
+import { paths } from './paths.js';
 
 export interface WatcherOptions {
   dir: string;
@@ -17,7 +18,7 @@ export interface WatcherOptions {
 }
 
 export const WATCHER_DEFAULTS = {
-  dir: 'C:/Users/ralfs/wise-build/demo-bank-card-app-deploy',
+  dir: paths.deployDir,
   repo: 'marshalofthecentralaltar/demo-bank-card-app',
   port: 3000,
   intervalSeconds: 2,

@@ -1,6 +1,6 @@
 // Criterion 10: the real owners line for the card page, with the Slack id looked up live.
 // Prints names only when no id is found. Run from tool/:
-// npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/owner-slack-id.ts
+// npx tsx --import ./src/loadSecrets.ts scripts/owner-slack-id.ts
 import { WebClient } from '@slack/web-api';
 import { findOwner, readOwnersMap, slackLookupFromEnv } from '../src/steps/owner.js';
 

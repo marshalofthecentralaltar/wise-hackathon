@@ -125,6 +125,7 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
   const channel = group.reports[0]?.channel ?? '';
   const threadTs = group.threadTs;
   let ownerSecrets: string[] = [];
+  let monitoringSource: RunTimings['monitoringSource'];
 
   const say = async (text: string): Promise<void> => {
     try {
@@ -148,7 +149,7 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
   return result;
 
   function timingsNow(): RunTimings {
-    return { groupId: group.id, startedAt, secondsByStep: { ...secs }, totalSeconds: since(t0) };
+    return { groupId: group.id, startedAt, secondsByStep: { ...secs }, totalSeconds: since(t0), ...(monitoringSource ? { monitoringSource } : {}) };
   }
 
   async function writeTimings(t: RunTimings): Promise<void> {
@@ -192,6 +193,7 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
       timed('owner', secs, () => (deps.findOwner ?? defaultFindOwner)(group.page)),
     ]);
     ownerSecrets = ownerStrings(owner);
+    monitoringSource = monitoring.source;
     await say(
       `Monitoring and logs: ${monitoring.showsProblem ? 'they show a problem' : monitoring.unavailable ? 'could not be read' : 'nothing'}. ` +
         `${commits.length} ${commits.length === 1 ? 'commit' : 'commits'} in the last ${config.recentDays} days. ` +
