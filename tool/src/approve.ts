@@ -30,6 +30,8 @@ export interface ApprovePress {
   threadTs?: string;
   /** The button's value. */
   value: string;
+  /** Set by the rehearsal script (autoApprove.ts): no person pressed; the thread must say so. */
+  unattended?: boolean;
   /** The handoff's blocks as Slack sent them with the press, so the button can be replaced. */
   blocks?: SlackBlock[];
 }
@@ -115,10 +117,12 @@ export async function handleApprovePress(press: ApprovePress, deps: ApproveDeps)
     }
     const at = now();
     const approvals = readApprovals(statePath);
-    approvals[key] = { by: press.userId, at: at.toISOString(), channel: press.channel, messageTs: press.messageTs };
+    approvals[key] = { by: press.unattended ? `rehearsal script for ${press.userId}` : press.userId, at: at.toISOString(), channel: press.channel, messageTs: press.messageTs };
     await mkdir(dirname(statePath), { recursive: true });
     await writeFile(statePath, JSON.stringify(approvals, null, 2), 'utf8');
-    const line = `Fix approved by <@${press.userId}> on ${formatUtc(at)}. Pull request #${value.pr} is merged.`;
+    const line = press.unattended
+      ? `Approved by the rehearsal script for <@${press.userId}>, without a person pressing the button, on ${formatUtc(at)}. Pull request #${value.pr} is merged.`
+      : `Fix approved by <@${press.userId}> on ${formatUtc(at)}. Pull request #${value.pr} is merged.`;
     try {
       await deps.slack.updateMessage({ channel: press.channel, ts: press.messageTs, text: line, blocks: approvedBlocks(press.blocks, line) });
     } catch (err) {

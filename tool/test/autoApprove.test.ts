@@ -64,7 +64,10 @@ describe('approveFromThread', () => {
     expect(h.slack.updates).toHaveLength(1);
     expect(h.slack.updates[0]!.blocks!.some((b) => b.type === 'actions')).toBe(false);
     const line = h.slack.updates[0]!.blocks!.find((b) => b.block_id === APPROVE_BLOCK_ID) as { text: { text: string } };
-    expect(line.text.text).toMatch(/^Fix approved by <@U0OWNER01> on /);
+    // No person pressed: the thread must never read as if the owner did.
+    expect(press.unattended).toBe(true);
+    expect(line.text.text).toMatch(/^Approved by the rehearsal script for <@U0OWNER01>, without a person pressing the button, on /);
+    expect(line.text.text).not.toMatch(/^Fix approved by/);
   });
 
   it('a thread without the button: a refusal and no call', async () => {

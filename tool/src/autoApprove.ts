@@ -79,6 +79,7 @@ export async function approveFromThread(opts: AutoApproveOptions): Promise<AutoA
     threadTs: opts.threadTs,
     value: found.value,
     blocks: found.blocks,
+    unattended: true,
   };
   const result = await (opts.approve ?? handleApprovePress)(press, { ...opts.approveDeps, slack: opts.slack });
   return { pressed: true, result, owner: value.owner, pr: value.pr, repo: value.repo, messageTs: found.messageTs };
