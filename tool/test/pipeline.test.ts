@@ -96,6 +96,14 @@ describe('runPipeline order', () => {
     expect(line.groupId).toBe('group-1');
     expect(Object.keys(line.secondsByStep).sort()).toEqual(['changes', 'fix', 'handoff', 'investigation', 'monitoring', 'owner', 'pattern', 'post', 'verdict']);
     expect(line.secondsByStep.pattern).toBe(6);
+    expect(line.monitoringSource).toBe(MONITORING.source);
+  });
+
+  it('the timings line carries the source step 3 read: a /metrics fallback is written as metrics-endpoint', async () => {
+    const timingsPath = join(mkdtempSync(join(tmpdir(), 'timings-')), 'timings.jsonl');
+    const result = await runPipeline(group(), deps(recordingSteps().code, new FakeSlack(), { timingsPath, checkMonitoring: async () => ({ ...MONITORING, source: 'metrics-endpoint' }) }));
+    expect(result.timings.monitoringSource).toBe('metrics-endpoint');
+    expect(JSON.parse(readFileSync(timingsPath, 'utf8').trim()).monitoringSource).toBe('metrics-endpoint');
   });
 });
 

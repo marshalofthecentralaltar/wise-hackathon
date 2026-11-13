@@ -5,12 +5,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { WebClient } from '@slack/web-api';
 import type { AutoApproveOutcome, ThreadMessage } from './autoApprove.js';
-import type { RunTimings } from './types.js';
+import type { MonitoringFinding, Page, RunTimings } from './types.js';
 
 export type Problem = 'flicker' | 'amount';
 export type Via = 'slack' | 'direct';
 
 const FIXTURE_PROBLEM: Record<Problem, string> = { flicker: 'card-picture-flicker', amount: 'transfers-amount-wrong' };
+/** The page each problem is on: what the starting-state check asks monitoring about. */
+export const PROBLEM_PAGE: Record<Problem, Page> = { flicker: 'card', amount: 'transfers' };
 const FIXTURES_PATH = fileURLToPath(new URL('../../fixtures/reports.json', import.meta.url));
 
 /** The first three English fixture reports of a problem. None says it is a test. */
@@ -87,8 +89,17 @@ export interface FullRunDeps {
   appAnswers(url: string): Promise<boolean>;
   browserCheck(expect: 'replaced' | 'stable'): Promise<{ pass: boolean; output: string }>;
   snapshot(): Promise<RepoSnapshot>;
-  /** --via direct: starts the tool in-process. --via slack: nothing (a separate tool is running). */
-  startTool(): Promise<void>;
+  /** Step 3 of the tool (checkMonitoring) for the problem's page, read before any report is posted. */
+  monitoring(page: Page): Promise<MonitoringFinding>;
+  /** Stop before posting when the starting-state monitoring did not come from Prometheus. */
+  requirePrometheus?: boolean;
+  /** false (--no-deploy-check): after a merge, the redeployed page is not checked, and the line says so. Default true. */
+  deployCheck?: boolean;
+  /**
+   * --via direct: starts the tool in-process. --via slack: starts the tool as its own process and
+   * resolves with its log file (or nothing when someone else runs it). Rejects when it did not start.
+   */
+  startTool(): Promise<{ log: string; pid: number } | void>;
   /** Posts the three reports; resolves with their ts in order. */
   post(): Promise<string[]>;
   readThread(threadTs: string): Promise<ThreadMessage[]>;
@@ -105,6 +116,11 @@ export interface FullRunDeps {
   log(line: string): void;
   handoffWaitMs?: number;
   mergeWaitMs?: number;
+  /**
+   * How long the starting state waits for Prometheus to hold a fresh reading of the app. A reset that
+   * redeploys restarts the app, and Prometheus reads up=0 until its next scrape (every 15 s). Default 45 s.
+   */
+  monitoringWaitMs?: number;
 }
 
 export interface FullRunLine {
@@ -121,6 +137,19 @@ export interface FullRunLine {
   seconds: { firstToolMessage: number | null; handoff: number | null; approvalToMerged: number | null; mergedToStable: number | null };
   timings: RunTimings | null;
   monitoring: string | null;
+  /** Where the starting-state monitoring came from (step 3's source); null when it was not read. */
+  monitoringSource: MonitoringFinding['source'] | null;
+  /** Where the tool's own step 3 read monitoring during the run (from its RunTimings line); null when not recorded. */
+  runMonitoringSource: MonitoringFinding['source'] | null;
+  /** Seconds the starting state waited for a Prometheus reading (0 when the first read was one); null when not read. */
+  startMonitoringWaitSeconds: number | null;
+  /** After a merge: 'checked' when the browser check ran on the redeployed page; otherwise why not. */
+  pageCheck: string | null;
+  /** The log file of the tool this run started as its own process (--via slack); null otherwise. */
+  toolLog: string | null;
+  toolPid: number | null;
+  /** Set by the script after it stopped that tool's process tree: true when the pid is gone. */
+  toolStopped: boolean | null;
   /** A reply in the thread that is not from the tool's bot (for example the old thin listener). */
   strangerReplies: string[];
   ok: boolean;
@@ -149,6 +178,13 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
     seconds: { firstToolMessage: null, handoff: null, approvalToMerged: null, mergedToStable: null },
     timings: null,
     monitoring: null,
+    monitoringSource: null,
+    runMonitoringSource: null,
+    startMonitoringWaitSeconds: null,
+    pageCheck: null,
+    toolLog: null,
+    toolPid: null,
+    toolStopped: null,
     strangerReplies: [],
     ok: false,
     failed: [],
@@ -176,14 +212,45 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
     const check = await d.browserCheck('replaced');
     if (!check.pass) fail(`the card page at ${d.appUrl} does not flicker before the run (browser check --expect replaced failed: ${check.output.trim().slice(0, 200)})`);
   }
+  // Monitoring, read the way the tool will read it in step 3.
+  const page = PROBLEM_PAGE[d.problem];
+  let finding: MonitoringFinding | null = null;
+  try {
+    const waitStart = d.now();
+    const waitLimit = d.monitoringWaitMs ?? 45_000;
+    finding = await d.monitoring(page);
+    while (finding.source !== 'prometheus' && d.now() - waitStart < waitLimit) {
+      d.log(`[full-run] monitoring came from ${finding.source}; waiting for Prometheus to read the app again (${secs(d.now() - waitStart)} s so far)`);
+      await d.sleep(5_000);
+      finding = await d.monitoring(page);
+    }
+    line.startMonitoringWaitSeconds = secs(d.now() - waitStart);
+  } catch (err) {
+    fail(`monitoring for the ${page} page could not be read before the run: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (finding) {
+    line.monitoringSource = finding.source;
+    if (finding.unavailable) fail(`monitoring for the ${page} page could not be read before the run (the tool would judge the problem high): ${finding.summary}`);
+    else if (finding.showsProblem) fail(`monitoring already shows a problem on the ${page} page before the run: ${finding.summary}`);
+    if (d.requirePrometheus && finding.source !== 'prometheus') fail(`monitoring came from ${finding.source}, not prometheus (--require-prometheus): ${finding.summary}`);
+  }
   if (line.failed.length) {
     line.stoppedBefore = 'starting-state';
-    return line;
+    return finish();
   }
   const before = await d.snapshot();
 
   // 3. The reports.
-  await d.startTool();
+  try {
+    const started = await d.startTool();
+    if (started) {
+      line.toolLog = started.log;
+      line.toolPid = started.pid;
+    }
+  } catch (err) {
+    fail(`the tool did not start: ${err instanceof Error ? err.message : String(err)}`);
+    return finish();
+  }
   const startedIso = new Date().toISOString();
   const posted = await d.post();
   const firstTs = posted[0]!;
@@ -249,11 +316,19 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
       if (line.merged) {
         const tm = d.now();
         line.seconds.approvalToMerged = secs(tm - ta);
-        const deployed = await d.waitDeployed();
-        if (deployed) {
-          if (!deployed.ok) fail(`the deployment did not reach the merge: ${deployed.note}`);
-          else {
+        if (d.deployCheck === false) {
+          line.pageCheck = 'not checked: --no-deploy-check';
+        } else {
+          const deployed = await d.waitDeployed();
+          if (!deployed) {
+            line.pageCheck = 'not checked: no deployment file';
+            fail('the redeployed page was not checked: no deployment file');
+          } else if (!deployed.ok) {
+            line.pageCheck = 'not checked: the deployment did not reach the merge';
+            fail(`the deployment did not reach the merge: ${deployed.note}`);
+          } else {
             const stable = await d.browserCheck('stable');
+            line.pageCheck = 'checked';
             if (stable.pass) line.seconds.mergedToStable = secs(d.now() - tm);
             else fail(`the card page still flickers after the merge was deployed: ${stable.output.trim().slice(0, 200)}`);
           }
@@ -264,6 +339,9 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
 
   line.timings = await d.timingsSince(startedIso);
   if (!line.timings) fail('no RunTimings line for this run in tool/.state/timings.jsonl');
+  line.runMonitoringSource = line.timings?.monitoringSource ?? null;
+  if (d.requirePrometheus && line.timings && line.runMonitoringSource !== 'prometheus')
+    fail(`the tool's own monitoring step read ${line.runMonitoringSource ?? 'no recorded source'}, not prometheus (--require-prometheus)`);
 
   // 6. What the case requires.
   if (d.problem === 'flicker') {

@@ -4,8 +4,15 @@
 // Run from tool/:
 //   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/full-run.ts \
 //     --problem flicker|amount --via slack|direct [--approve] [--app-url http://localhost:3000] [--gap-seconds 3]
-// --via slack  : posts as "Support Desk" (SLACK_TEST_BOT_TOKEN); needs `npm run tool` running
-//                separately, started after the reset (it keeps its groups in memory).
+//     [--tool own|external] [--require-prometheus] [--no-deploy-check]
+// --via slack  : posts as "Support Desk" (SLACK_TEST_BOT_TOKEN). After the reset and the
+//                starting-state check it starts the tool as its own process (what `npm run tool`
+//                runs), waits for its "Listening in" line (60 s), and stops its process tree at the
+//                end, also on failure; its log path is `toolLog` in the line. --tool external: someone
+//                else runs `npm run tool` (it notices the reset's deleted state file).
+// --require-prometheus: stop before posting when the starting-state monitoring is not from Prometheus.
+// --no-deploy-check: after a merge, do not wait for the deployment and do not check the page (the
+//                line says so in `pageCheck`). Without it a missing deployment file fails the run.
 // --via direct : the FALLBACK without the second Slack app. Starts the tool in this process
 //                without a Slack connection, posts the reports with the tool's own bot (which the
 //                listener ignores by design) and hands each one to the listener's handler as a
@@ -25,6 +32,10 @@ import { CARD_APP_REPO, DEFAULT_DEPLOY_DIR, isToolBranchName, resetTool, waitFor
 import { webSlackPort } from '../src/slackPost.js';
 import { startTool, type RunningTool } from '../src/startTool.js';
 import { ghApi, spawnTool } from '../src/steps/exec.js';
+import { checkMonitoring } from '../src/steps/monitoring.js';
+import { ARTIFACTS_DIR, fileStamp, isAlive, startToolProcess, stopTree, type Started } from './lib/procs.js';
+import { readRecord } from './lib/demo.js';
+import { join } from 'node:path';
 import type { RunTimings } from '../src/types.js';
 import { SECRETS_FILE, emptyTestTokenMessage } from './lib/secretsLine.js';
 
@@ -37,8 +48,11 @@ const via = arg('via') as Via;
 const approve = process.argv.includes('--approve');
 const appUrl = (arg('app-url', config.appBaseUrl) ?? '').replace(/\/$/, '');
 const gapSeconds = Number(arg('gap-seconds', '3'));
-if ((problem !== 'flicker' && problem !== 'amount') || (via !== 'slack' && via !== 'direct')) {
-  console.error('usage: full-run.ts --problem flicker|amount --via slack|direct [--approve] [--app-url <url>] [--gap-seconds 3]');
+const toolMode = arg('tool', 'own');
+const requirePrometheus = process.argv.includes('--require-prometheus');
+const deployCheck = !process.argv.includes('--no-deploy-check');
+if ((problem !== 'flicker' && problem !== 'amount') || (via !== 'slack' && via !== 'direct') || (toolMode !== 'own' && toolMode !== 'external')) {
+  console.error('usage: full-run.ts --problem flicker|amount --via slack|direct [--approve] [--app-url <url>] [--gap-seconds 3] [--tool own|external] [--require-prometheus] [--no-deploy-check]');
   process.exit(2);
 }
 const log = (s: string) => process.stderr.write(`${new Date().toISOString().slice(11, 19)} ${s}\n`);
@@ -69,6 +83,8 @@ const slack = webSlackPort(botClient);
 const DIRECT_SENDER = 'U0SUPPORTDESK';
 
 let tool: RunningTool | undefined;
+/** The tool this run started as its own process (--via slack --tool own). */
+let toolProcess: Started | undefined;
 
 function browserCheck(expect: 'replaced' | 'stable'): Promise<{ pass: boolean; output: string }> {
   return new Promise((resolve) => {
@@ -130,9 +146,23 @@ const deps: FullRunDeps = {
     const pulls = await pullsAll();
     return { branches: branches.map((b) => b.name), maxPull: Math.max(0, ...pulls.map((p) => p.number)) };
   },
+  monitoring: (page) => checkMonitoring(page),
+  requirePrometheus,
+  deployCheck,
   async startTool() {
-    if (via !== 'direct') return;
-    tool = await startTool({ listen: false, log: (m) => log(m), logError: (m) => log(m) });
+    if (via === 'direct') {
+      tool = await startTool({ listen: false, log: (m) => log(m), logError: (m) => log(m) });
+      return;
+    }
+    if (toolMode === 'external') return;
+    // Two tools on one Slack app split the events between them.
+    const demoTool = readRecord()?.toolPid;
+    if (demoTool && isAlive(demoTool)) throw new Error(`a tool started by demo-start --with-tool is running (pid ${demoTool}); run with --tool external, or start the demo without --with-tool`);
+    const toolLog = join(ARTIFACTS_DIR, `tool-${fileStamp()}-${problem}.log`);
+    log(`starting the tool as its own process; log ${toolLog}`);
+    toolProcess = await startToolProcess({ log: toolLog });
+    log(`the tool is listening (pid ${toolProcess.pid})`);
+    return { log: toolProcess.log, pid: toolProcess.pid };
   },
   async post() {
     const texts = pickReports(problem);
@@ -186,9 +216,9 @@ const deps: FullRunDeps = {
 };
 
 let code = 1;
+let line: Awaited<ReturnType<typeof runFullCase>> | undefined;
 try {
-  const line = await runFullCase(deps);
-  console.log(JSON.stringify(line));
+  line = await runFullCase(deps);
   code = line.ok ? 0 : 1;
 } catch (err) {
   console.error(`full-run stopped: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
@@ -198,5 +228,18 @@ try {
     await tool.warmed;
     await tool.stop();
   }
+  if (toolProcess) {
+    const gone = await stopTree(toolProcess.pid);
+    log(`stopped the tool's process tree (pid ${toolProcess.pid}): ${gone ? 'gone' : 'STILL RUNNING'}`);
+    if (line) {
+      line.toolStopped = gone;
+      if (!gone) {
+        line.failed.push(`the tool's process ${toolProcess.pid} is still running after the stop`);
+        line.ok = false;
+        code = 1;
+      }
+    }
+  }
 }
+if (line) console.log(JSON.stringify(line));
 process.exit(code);
