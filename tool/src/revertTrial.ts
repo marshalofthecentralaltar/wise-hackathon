@@ -25,8 +25,9 @@ export async function trialRevert(copyDir: string, sha: string): Promise<boolean
   if (!before.head) throw new Error(`trialRevert: ${copyDir} is not a git working copy`);
   if (before.status) throw new Error(`trialRevert: the copy has changes before the trial:\n${before.status}`);
 
-  const parents = (await git(['rev-list', '--parents', '-n', '1', sha], copyDir)).stdout.trim().split(/\s+/);
-  if (parents.length < 2) throw new Error(`trialRevert: unknown commit ${sha}`);
+  // "<sha> <parent> <parent>..."; a root commit prints only its own sha.
+  const parents = (await git(['rev-list', '--parents', '-n', '1', sha], copyDir)).stdout.trim().split(/\s+/).filter(Boolean);
+  if (parents.length < 1) throw new Error(`trialRevert: unknown commit ${sha}`);
   const isMerge = parents.length > 2;
 
   const attempt = await git(['revert', '--no-commit', '--no-edit', ...(isMerge ? ['-m', '1'] : []), sha], copyDir);
