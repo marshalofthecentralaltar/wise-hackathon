@@ -43,6 +43,7 @@ async function main(): Promise<number> {
   const client = new WebClient(env.slackBotToken);
   const auth = await client.auth.test();
   const botUserId = auth.user_id ?? '';
+  const botId = auth.bot_id ?? '';
   const channelId = await findChannelId(client, SUPPORT_CHANNEL);
   if (!channelId) {
     console.error(`#${SUPPORT_CHANNEL} not found (the bot needs channels:read)`);
@@ -62,7 +63,7 @@ async function main(): Promise<number> {
 
   app.event('message', async ({ event, client: web }) => {
     const msg = event as SlackMessageEvent;
-    if (msg.channel !== channelId || !isCustomerReportCandidate(msg, botUserId)) return;
+    if (msg.channel !== channelId || !isCustomerReportCandidate(msg, { botUserId, botId })) return;
     const threadTs = msg.ts as string;
     await web.chat.postMessage({ channel: channelId, thread_ts: threadTs, text: 'Looking into it' });
     queue = queue.then(async () => {
@@ -83,6 +84,7 @@ async function main(): Promise<number> {
   await app.start();
   console.log(`team: ${auth.team}`);
   console.log(`bot user id: ${botUserId}`);
+  console.log(`bot id: ${botId}`);
   console.log(`channel: #${SUPPORT_CHANNEL} (${channelId})`);
   console.log('connected');
   if (check) {

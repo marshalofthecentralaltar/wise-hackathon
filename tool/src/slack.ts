@@ -8,10 +8,27 @@
 //   ("A message was posted by an integration") is the classic-app form with a `bot_id`
 //   and no user. For current (granular-permission) apps, Slack says to detect bot-sent
 //   messages by "the presence of the `bot_id` and `bot_profile` fields in the event
-//   payload"; such a message may carry no subtype at all, so the subtype alone is not enough.
+//   payload"; such a message may carry no subtype at all.
 // - https://docs.slack.dev/messaging/retrieving-messages : a message with a `thread_ts`
 //   is part of a thread; when `thread_ts` equals `ts` it is the parent, when they differ it
 //   is a reply. A parent keeps its `thread_ts` even after its replies are deleted.
+//
+// What is rejected, and why:
+// - Our own messages: `user` equals our bot user id, or `bot_id` equals our bot id (both
+//   from auth.test). Either alone is enough, so the tool never answers itself.
+// - Thread replies (`thread_ts` differs from `ts`) and `thread_broadcast`: the tool talks
+//   in threads; a report is a new top-level message.
+// - Edits, deletions, joins and every other subtype except `bot_message` and `file_share`:
+//   they are not new reports.
+// - Empty text.
+// Messages from other apps are accepted, with or without the classic `bot_message`
+// subtype: reports reach real support channels through integrations, and the full-run
+// script posts its test reports from a second app. Nothing else about the sender matters.
+
+export interface OwnIdentity {
+  botUserId: string;
+  botId: string;
+}
 
 export interface SlackMessageEvent {
   type?: string;
@@ -27,15 +44,15 @@ export interface SlackMessageEvent {
   hidden?: boolean;
 }
 
-/** Subtypes a person produces by typing a new top-level message. */
-const TYPED_SUBTYPES = new Set<string | undefined>([undefined, 'file_share']);
+/** Subtypes that are a new top-level message, typed by a person or posted by another app. */
+const NEW_MESSAGE_SUBTYPES = new Set<string | undefined>([undefined, 'file_share', 'bot_message']);
 
-export function isCustomerReportCandidate(event: SlackMessageEvent, botUserId: string): boolean {
+export function isCustomerReportCandidate(event: SlackMessageEvent, own: OwnIdentity): boolean {
   if (event.type !== undefined && event.type !== 'message') return false;
-  if (!TYPED_SUBTYPES.has(event.subtype)) return false; // edits, deletions, joins, bot_message, broadcasts
+  if (!NEW_MESSAGE_SUBTYPES.has(event.subtype)) return false; // edits, deletions, joins, broadcasts
   if (event.hidden) return false;
-  if (event.bot_id || event.bot_profile || event.app_id) return false; // posted by an app, ours or another
-  if (!event.user || event.user === botUserId) return false; // our own messages
+  if (own.botUserId && event.user === own.botUserId) return false; // ours, by user id
+  if (own.botId && event.bot_id === own.botId) return false; // ours, by bot id
   if (event.thread_ts && event.thread_ts !== event.ts) return false; // a reply inside a thread
   if (!event.text || !event.text.trim()) return false;
   return true;

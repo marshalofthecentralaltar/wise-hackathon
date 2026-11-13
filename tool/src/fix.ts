@@ -62,7 +62,25 @@ const NETWORK_TIMEOUT_MS = 60_000;
 const CLAUDE_TIMEOUT_MS = 300_000;
 const TEST_TIMEOUT_MS = 120_000;
 
-function run(
+/** Ends a process and every process it started. child.kill() on Windows ends only the top one. */
+export function killTree(pid: number): void {
+  if (process.platform === 'win32') {
+    // Spawned without a shell, so no Git Bash path rewriting of /PID, /T, /F.
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGKILL'); // the process group; run() starts children detached on POSIX
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+}
+
+export function run(
   cmd: string,
   args: string[],
   opts: { cwd: string; timeoutMs: number; input?: string; shell?: boolean },
@@ -73,28 +91,51 @@ function run(
       env: buildChildEnv(process.env),
       shell: opts.shell ?? false,
       windowsHide: true,
+      detached: process.platform !== 'win32', // own process group, so the whole group can be killed
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let settled = false;
+    const finish = (r: RunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(lastResort);
+      resolve(r);
+    };
+    let lastResort: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      if (child.pid !== undefined) killTree(child.pid);
+      // If a grandchild still holds the pipes, do not wait on 'close' forever.
+      lastResort = setTimeout(() => finish({ code: null, stdout, stderr, timedOut }), 3_000);
     }, opts.timeoutMs);
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({ code: -1, stdout, stderr: stderr + String(err), timedOut });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
-    });
+    child.on('error', (err) => finish({ code: -1, stdout, stderr: stderr + String(err), timedOut }));
+    child.on('close', (code) => finish({ code, stdout, stderr, timedOut }));
     // Nobody is there to answer: stdin carries the prompt (or nothing) and is closed.
     child.stdin.end(opts.input ?? '');
   });
+}
+
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
+/** The tool commits as itself, never as whoever owns the machine's global git config. */
+export function toolGitIdentity(env: NodeJS.ProcessEnv = process.env): GitIdentity {
+  return {
+    name: env.TOOL_GIT_NAME?.trim() || 'Demo Bank Triage',
+    email: env.TOOL_GIT_EMAIL?.trim() || '195171080+marshalofthecentralaltar@users.noreply.github.com',
+  };
+}
+
+export function commitArgs(title: string, body: string, identity: GitIdentity): string[] {
+  return ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, 'commit', '-q', '-m', title, '-m', body];
 }
 
 /**
@@ -241,10 +282,10 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
   for (const args of [
     ['checkout', '-q', '-b', branch],
     ['add', '-A'],
-    ['commit', '-q', '-m', title, '-m', `Written by Claude Code (model: ${model}) from a customer report. Tests run by the tool: ${testCmd}.`],
+    commitArgs(title, `Written by Claude Code (model: ${model}) from a customer report. Tests run by the tool: ${testCmd}.`, toolGitIdentity()),
   ]) {
     const r = await run('git', args, { cwd, timeoutMs: 10_000 });
-    if (r.code !== 0) return fail('push', `git ${args[0]} failed`, r.stderr + r.stdout, branch);
+    if (r.code !== 0) return fail('push', `git ${args.join(' ').slice(0, 40)} failed`, r.stderr + r.stdout, branch);
   }
   const push = await run('git', ['push', '-q', '-u', 'origin', branch], { cwd, timeoutMs: NETWORK_TIMEOUT_MS });
   done('push', t0);
