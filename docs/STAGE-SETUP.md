@@ -103,11 +103,11 @@ npm ci
 
 ## 7. The secrets file (about 3 minutes, guess)
 
-Run the readiness check once; when the secrets file does not exist yet it makes an empty one
-with the four names:
+Run the quick, offline readiness check once (about 10 seconds, guess); when the secrets file does
+not exist yet it makes an empty one with the four names:
 
 ```
-npm run doctor
+npm run doctor -- --offline
 ```
 
 It prints `MISSING secrets file: C:/wise-build/secrets.env did not exist; created it ...`. Open
@@ -152,7 +152,7 @@ owner found in Slack, ports 3000 and 9090 free, and `DISABLE_AUTOUPDATER`.
 A busy port 3000 or 9090 means the demo (or a copy of the card app or Prometheus) is already
 running: stop it with the stop command below, then run the doctor again.
 
-## 9. Start, reset and stop the demo
+## 9. Start, reset and stop the demo (time added at the join)
 
 Added by the orchestrator at the join (another part of the work builds these commands):
 
@@ -163,8 +163,8 @@ Added by the orchestrator at the join (another part of the work builds these com
 ## Settings a laptop may need
 
 None by hand on a laptop set up as above (measured on the build PC on 13 Nov: a fresh clone in a
-folder not named `wise-build` passed the offline doctor, the type check, all 241 tests, and
-connected to Slack). These exist for unusual layouts:
+folder not named `wise-build` ran the offline doctor, which named the missing secrets file and
+created it there, then passed the type check and all 241 tests, and connected to Slack). These exist for unusual layouts:
 
 | Variable | What it changes | Default |
 |---|---|---|
