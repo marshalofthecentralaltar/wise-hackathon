@@ -160,7 +160,7 @@ export function fallbackCustomerSentence(group: Pick<ReportGroup, 'page'>): stri
 }
 
 const SYSTEM = [
-  'You write one sentence a bank support agent may send to customers who reported a problem in the app.',
+  'You write exactly one sentence a bank support agent may send to customers who reported a problem in the app.',
   'Plain, calm English. Say we know about the problem and are working on it.',
   'Never name a person, a team, a commit, a file, code or a cause inside the code.',
   'Never promise a time or a date. Do not apologise more than once. No em dashes.',
@@ -177,7 +177,7 @@ export function customerSentenceProblem(text: string, forbidden: string[] = []):
   const t = text.trim();
   if (!t) return 'empty';
   if (t.length > 300) return 'too long';
-  if (t.split(/(?<=[.!?])\s+/).filter(Boolean).length > 2) return 'more than one sentence';
+  if (t.split(/(?<=[.!?])\s+/).filter(Boolean).length > 1) return 'more than one sentence';
   if (/[—–]/.test(t)) return 'dash';
   if (/\b[0-9a-f]{7,40}\b/i.test(t)) return 'commit-like id';
   if (/[\w-]+\.(tsx?|jsx?|json|css|html)\b|\bsrc\//i.test(t)) return 'file name';

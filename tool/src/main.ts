@@ -11,22 +11,17 @@ import { investigate } from './investigate.js';
 import { PipelineQueue, runPipeline } from './pipeline.js';
 import { isCustomerReportCandidate, type SlackMessageEvent } from './slack.js';
 import { webSlackPort, type SlackBlock } from './slackPost.js';
+import { standInFix } from './standInFix.js';
 import { findOwner, slackLookup } from './steps/owner.js';
 import { addReports } from './steps/reports.js';
-import type { CodeSteps, FixOutcome, FixStepInput, Report } from './types.js';
+import type { CodeSteps, Report } from './types.js';
 import { classifyCustomerEffect, judge } from './verdict.js';
-
-// STAND-IN for step 8 until the fix step (src/fixStep.ts, another lane) is joined. The
-// orchestrator replaces this function at the join. It changes no code and opens no pull request.
-async function standInFix(_input: FixStepInput): Promise<FixOutcome> {
-  return { kind: 'none', prUrl: null, prNumber: null, branch: null, filesChanged: [], testsPassed: null, note: 'fix step not joined yet', seconds: 0 };
-}
 
 const codeSteps: CodeSteps = {
   investigate: (input) => investigate(input),
   classifyCustomerEffect: (texts) => classifyCustomerEffect(texts),
   judge,
-  fix: standInFix,
+  fix: standInFix, // STAND-IN for step 8: swap for the real fix step at the join
 };
 
 async function findChannelId(client: WebClient, name: string): Promise<string | undefined> {

@@ -138,6 +138,7 @@ describe('part 8: the sentence for customers', () => {
       'Ownerlogin is fixing it.',
       'It will be fixed within two hours.',
       'It will be fixed today.',
+      'We are sorry. We know about it and are working on it.',
     ]) {
       expect(await customerSentence(g, { forbidden: ['ownerlogin'], model: async () => ({ ok: true, text }) })).toBe(fallbackCustomerSentence(g));
     }
