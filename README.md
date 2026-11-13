@@ -10,7 +10,7 @@ Status on 13 November 2026, 17:45 UTC: nothing is built. This repository holds t
 2. Pick an open issue labelled `side-feature` or `needs-person` and comment "taking this".
 3. Follow "How to work on an issue" in the context file.
 
-If you work with a coding agent, [`AGENTS.md`](AGENTS.md) holds its instructions.
+Who does what and in what order is in [`docs/START.md`](docs/START.md). If you work with a coding agent, [`AGENTS.md`](AGENTS.md) holds its instructions.
 
 ## AI use
 
