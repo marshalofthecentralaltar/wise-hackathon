@@ -17,6 +17,21 @@ function stateFile(): string {
 }
 const starts = (state: string) => (existsSync(state) ? readFileSync(state, 'utf8').split('\n').filter(Boolean).length : 0);
 const flaky = (mode: string, state: string) => () => ({ cmd: process.execPath, prefixArgs: [FLAKY, mode, state] });
+/**
+ * First resolution: a command that exits at once with code 1 and nothing on stdout (cmd.exe, which
+ * starts fast even on a loaded PC, unlike node). Every later one: the stand-in, which answers.
+ */
+function failsOnceThenAnswers(state: string) {
+  const calls = { n: 0 };
+  writeFileSync(state, 'start 0\n'); // the stand-in counts this as an earlier start, so it answers at once
+  const resolver = () => {
+    calls.n++;
+    return calls.n === 1
+      ? { cmd: process.env.ComSpec ?? 'cmd.exe', prefixArgs: ['/d', '/c', 'exit 1'] }
+      : flaky('fail-once', state)();
+  };
+  return { resolver, calls };
+}
 
 afterEach(() => {
   setModelLauncherResolver();
@@ -26,12 +41,14 @@ afterEach(() => {
 describe('a model that fails to start is resolved again and retried once', () => {
   it('the fix runner (writeFixPullRequest): first start fails, the retry edits, the run goes on to its next stage', async () => {
     const state = stateFile();
-    setModelLauncherResolver(flaky('fail-once', state));
+    const f = failsOnceThenAnswers(state);
+    setModelLauncherResolver(f.resolver);
     const { dir, cleanup } = newRepo('runmodel-fix-');
     try {
       writeAndCommit(dir, { 'package.json': '{"name":"t"}', 'a.txt': 'a\n' }, 'base');
       const r = await writeFixPullRequest({ repo: 'o/r', reportText: 'x', model: 'sonnet', copyDir: dir, baseBranch: 'main', prompt: 'p', allowFile: () => false });
-      expect(starts(state)).toBe(2);
+      expect(f.calls.n).toBe(2); // resolved again after the failed start
+    expect(starts(state)).toBe(2); // the earlier start plus the retry
       expect(r.ok).toBe(false);
       // Past the model: the guard saw the retry's change. Without the retry it would stop at 'claude'.
       expect(r.ok === false && r.stage).toBe('guard');
@@ -43,17 +60,21 @@ describe('a model that fails to start is resolved again and retried once', () =>
 
   it('the question runner (claude.ts askClaude): structured answer after one retry', async () => {
     const state = stateFile();
-    setModelLauncherResolver(flaky('fail-once', state));
+    const f = failsOnceThenAnswers(state);
+    setModelLauncherResolver(f.resolver);
     const a = await askQuestion({ prompt: 'p', cwd: tmpdir(), model: 'haiku', tools: [], maxTurns: 1, jsonSchema: {}, timeoutMs: 30_000 });
-    expect(starts(state)).toBe(2);
+    expect(f.calls.n).toBe(2); // resolved again after the failed start
+    expect(starts(state)).toBe(2); // the earlier start plus the retry
     expect(a.answer).toEqual({ customerEffect: 'appearance' });
   }, 30_000);
 
   it('the text runner (steps/exec.ts askClaude): ok after one retry', async () => {
     const state = stateFile();
-    setModelLauncherResolver(flaky('fail-once', state));
+    const f = failsOnceThenAnswers(state);
+    setModelLauncherResolver(f.resolver);
     const a = await askText('p', 'system', 'haiku', 30_000);
-    expect(starts(state)).toBe(2);
+    expect(f.calls.n).toBe(2); // resolved again after the failed start
+    expect(starts(state)).toBe(2); // the earlier start plus the retry
     expect(a.ok).toBe(true);
     expect(a.text).toContain('appearance');
   }, 30_000);
