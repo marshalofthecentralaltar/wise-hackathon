@@ -16,7 +16,28 @@ interface Fixture {
 }
 
 const fixtures = JSON.parse(readFileSync(fileURLToPath(new URL('../../fixtures/reports.json', import.meta.url)), 'utf8')) as Fixture[];
-const runs = Number(process.argv[2] ?? 2);
+// Arguments: [runs] [--seed=N]. With a seed the 60 messages are fed in a shuffled order.
+const runs = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) ?? 2);
+const seedArg = process.argv.find((a) => a.startsWith('--seed='));
+const seed = seedArg ? Number(seedArg.slice('--seed='.length)) : null;
+
+/** Fisher-Yates with mulberry32, so a seed always gives the same order. */
+function shuffled<T>(items: T[], s: number): T[] {
+  let a = s >>> 0;
+  const rand = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 const tsOf = (i: number) => `1700000000.${String(i).padStart(6, '0')}`;
 const idByTs = new Map(fixtures.map((f, i) => [tsOf(i), f.id]));
 const fixtureById = new Map(fixtures.map((f) => [f.id, f]));
@@ -35,10 +56,10 @@ async function oneRun(run: number) {
   const logs: string[] = [];
   const store = new ReportStore({ statePath: null, threshold: 3, log: (m) => logs.push(m) });
   const t0 = performance.now();
-  for (let i = 0; i < fixtures.length; i += 3) {
-    const batch: Report[] = fixtures.slice(i, i + 3).map((f, j) => ({ channel: 'C-FIXTURE', ts: tsOf(i + j), sender: 'U-FIXTURE', text: f.text }));
-    await store.addReports(batch);
-  }
+  const all: Report[] = fixtures.map((f, i) => ({ channel: 'C-FIXTURE', ts: tsOf(i), sender: 'U-FIXTURE', text: f.text }));
+  const order = seed === null ? all : shuffled(all, seed);
+  if (seed !== null) console.log(`\nRun ${run} order (seed ${seed}): ${order.map((r) => idByTs.get(r.ts)).join(',')}`);
+  for (let i = 0; i < order.length; i += 3) await store.addReports(order.slice(i, i + 3));
   const seconds = Math.round((performance.now() - t0) / 100) / 10;
   const state = store.state();
   const groups = state.groups.map((g) => ({ id: g.id, page: g.page, summary: g.summary, ids: g.reports.map((r) => idByTs.get(r.ts)!) }));
@@ -96,7 +117,7 @@ async function oneRun(run: number) {
 const results = [];
 for (let run = 1; run <= runs; run++) results.push(await oneRun(run));
 mkdirSync(fileURLToPath(new URL('../artifacts/', import.meta.url)), { recursive: true });
-writeFileSync(fileURLToPath(new URL('../artifacts/grouping-fixture.json', import.meta.url)), JSON.stringify(results, null, 2));
+writeFileSync(fileURLToPath(new URL(`../artifacts/grouping-fixture${seed === null ? '' : `-seed${seed}`}.json`, import.meta.url)), JSON.stringify(results, null, 2));
 const pass = results.every((r) => Object.values(r.checks).every(Boolean));
 console.log(`\n${pass ? 'PASS' : 'FAIL'}: ${results.map((r) => `run ${r.run} ${Object.values(r.checks).every(Boolean) ? 'pass' : 'fail'}`).join(', ')}`);
 process.exitCode = pass ? 0 : 1;
