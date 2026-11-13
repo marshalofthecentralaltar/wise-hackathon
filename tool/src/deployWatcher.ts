@@ -4,8 +4,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { dirname } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { killTree, run } from './fix.js';
 
 export interface WatcherOptions {
@@ -64,10 +64,17 @@ export interface DeployOps {
   install(): Promise<void>;
   build(): Promise<void>;
   stopApp(): Promise<void>;
-  startApp(): Promise<void>;
+  /** Starts the built app. `onExit` is called when it exits without stopApp having stopped it. */
+  startApp(onExit: (code: number | null) => void): Promise<void>;
   /** Resolves when the page answers 200; throws when it does not in time. */
   waitReady(): Promise<void>;
+  /** Writes `<dir>/.deployed.json` for the running commit, or removes it (null) when no app runs. */
+  recordDeployed(commit: string | null): Promise<void>;
 }
+
+/** Restarts of an app that exited by itself allowed within RESTART_WINDOW_MS before the watcher gives up. */
+export const MAX_RESTARTS = 3;
+export const RESTART_WINDOW_MS = 60_000;
 
 export interface RedeployRecord {
   event: 'start' | 'redeploy';
@@ -104,6 +111,9 @@ export class DeployWatcher {
   /** A commit whose deploy failed; it is not tried again until the remote moves elsewhere. */
   private failed: string | null = null;
   private running: Promise<void> | null = null;
+  /** When the watcher restarted an app that exited by itself (within the last minute). */
+  private restarts: number[] = [];
+  private stopped = false;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
   private readonly onRedeploy: (record: RedeployRecord) => void;
@@ -131,9 +141,61 @@ export class DeployWatcher {
     this.kick();
   }
 
-  /** Resolves when no deploy is running. */
+  /** Resolves when no deploy or app restart is running. */
   async idle(): Promise<void> {
     while (this.running) await this.running;
+  }
+
+  /** Stops the app and removes the deployed-commit file. The watcher does nothing after this. */
+  async shutdown(): Promise<void> {
+    this.stopped = true;
+    await this.ops.stopApp();
+    await this.record(null);
+  }
+
+  private async record(commit: string | null): Promise<void> {
+    try {
+      await this.ops.recordDeployed(commit);
+    } catch (err) {
+      this.log(`Could not ${commit ? 'write' : 'remove'} .deployed.json: ${reason(err)}`);
+    }
+  }
+
+  private readonly onAppExit = (code: number | null): void => {
+    // A deploy or restart in progress handles its own app (waitReady fails); after shutdown nothing restarts.
+    if (this.stopped || this.running || this.deployed === null) return;
+    this.running = (async () => {
+      try {
+        await this.restartApp(code);
+      } finally {
+        this.running = null;
+      }
+      this.kick();
+    })();
+  };
+
+  /** The deployed app exited by itself: start the same build again, at most MAX_RESTARTS times a minute. */
+  private async restartApp(code: number | null): Promise<void> {
+    const commit = this.deployed!;
+    for (;;) {
+      const now = this.now();
+      this.restarts = this.restarts.filter((t) => now - t < RESTART_WINDOW_MS);
+      if (this.restarts.length >= MAX_RESTARTS) {
+        this.log(`The app from ${short(commit)} exited (code ${code}) after ${MAX_RESTARTS} restarts within ${RESTART_WINDOW_MS / 1000} s; giving up. It stays down until the next change of main.`);
+        await this.record(null);
+        return;
+      }
+      this.restarts.push(now);
+      try {
+        await this.ops.startApp(this.onAppExit);
+        await this.ops.waitReady();
+        this.log(`The app from ${short(commit)} exited (code ${code}); restarted it, /card answered 200 after ${secs(this.now() - now)} s.`);
+        return;
+      } catch (err) {
+        this.log(`Restart of the app from ${short(commit)} failed: ${reason(err)}.`);
+        code = null;
+      }
+    }
   }
 
   private wanted(): { commit: string; seenAt: number } | null {
@@ -143,7 +205,7 @@ export class DeployWatcher {
   }
 
   private kick(): void {
-    if (this.running || !this.wanted()) return;
+    if (this.stopped || this.running || !this.wanted()) return;
     this.running = (async () => {
       try {
         for (let next = this.wanted(); next; next = this.wanted()) {
@@ -192,12 +254,14 @@ export class DeployWatcher {
 
       stage = 'restart';
       if (!first) await this.ops.stopApp();
-      await this.ops.startApp();
+      await this.ops.startApp(this.onAppExit);
       await this.ops.waitReady();
       const t3 = this.now();
 
       this.deployed = to;
       this.failed = null;
+      this.restarts = [];
+      await this.record(to);
       this.onRedeploy({
         event: first ? 'start' : 'redeploy',
         from,
@@ -232,17 +296,48 @@ export class DeployWatcher {
         this.installedFrom = commit;
       }
       await this.ops.build();
-      await this.ops.startApp();
+      await this.ops.startApp(this.onAppExit);
       await this.ops.waitReady();
+      await this.record(commit);
       this.log(`Recovered: the app from ${short(commit)} runs again.`);
     } catch (err) {
       this.deployed = null;
+      await this.record(null);
       this.log(`Could not bring back ${short(commit)}: ${reason(err)}. The app is down until the next change of main.`);
     }
   }
 }
 
 const READY_TIMEOUT_MS = 60_000;
+
+/** Written in the checkout after every successful deploy: {"commit":"<full sha>","at":"<ISO time>"}. */
+export const DEPLOYED_FILE = '.deployed.json';
+
+/** True for the app's own request-log lines (one JSON object with method, path and status), which are not echoed. */
+export function isRequestLogLine(line: string): boolean {
+  const t = line.trim();
+  if (!t.startsWith('{')) return false;
+  try {
+    const o = JSON.parse(t) as unknown;
+    return typeof o === 'object' && o !== null && !Array.isArray(o) && 'method' in o && 'path' in o && 'status' in o;
+  } catch {
+    return false;
+  }
+}
+
+/** Keeps .deployed.json out of `git status` in the checkout, via .git/info/exclude. */
+async function excludeFromGit(dir: string): Promise<void> {
+  const exclude = join(dir, '.git', 'info', 'exclude');
+  const line = `/${DEPLOYED_FILE}`;
+  let text = '';
+  try {
+    text = await readFile(exclude, 'utf8');
+  } catch {
+    await mkdir(dirname(exclude), { recursive: true });
+  }
+  if (text.split(/\r?\n/).includes(line)) return;
+  await writeFile(exclude, `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${line}\n`);
+}
 
 const tail = (text: string, lines = 15) => text.trim().split(/\r?\n/).slice(-lines).join('\n');
 
@@ -329,7 +424,30 @@ export function realDeployOps(opts: WatcherOptions, log: (line: string) => void 
       await npm(['run', 'build'], 5 * NET);
     },
     stopApp,
-    async startApp() {
+    async recordDeployed(commit) {
+      const file = join(opts.dir, DEPLOYED_FILE);
+      if (commit === null) {
+        await rm(file, { force: true });
+        return;
+      }
+      await excludeFromGit(opts.dir);
+      const tmp = `${file}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify({ commit, at: new Date().toISOString() }) + '\n');
+      // Rename is atomic on one volume; a reader holding the old file open can make Windows refuse it for a moment.
+      for (let i = 0; ; i++) {
+        try {
+          await rename(tmp, file);
+          return;
+        } catch (err) {
+          if (i >= 20) {
+            await rm(tmp, { force: true });
+            throw err;
+          }
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+    },
+    async startApp(onExit) {
       appExited = false;
       const child = spawn('npm', ['start'], {
         cwd: opts.dir,
@@ -340,13 +458,16 @@ export function realDeployOps(opts: WatcherOptions, log: (line: string) => void 
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       app = child;
-      const prefix = (d: Buffer) => d.toString().split(/\r?\n/).filter(Boolean).forEach((l) => log(`[app] ${l}`));
+      const prefix = (d: Buffer) =>
+        d.toString().split(/\r?\n/).filter((l) => l.trim() && !isRequestLogLine(l)).forEach((l) => log(`[app] ${l}`));
       child.stdout?.on('data', prefix);
       child.stderr?.on('data', prefix);
       child.on('exit', (code) => {
         if (app === child) {
+          // Not stopped by stopApp (which clears `app` first): the app died by itself.
           appExited = true;
           log(`[app] exited with code ${code}`);
+          onExit(code);
         }
       });
     },

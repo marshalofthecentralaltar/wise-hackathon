@@ -1,6 +1,6 @@
 // The deploy watcher's logic with fake git, npm and app actions: no network, no processes.
 import { describe, expect, it } from 'vitest';
-import { DeployWatcher, parseWatcherArgs, type DeployOps, type RedeployRecord } from '../src/deployWatcher.js';
+import { DeployWatcher, isRequestLogLine, parseWatcherArgs, type DeployOps, type RedeployRecord } from '../src/deployWatcher.js';
 
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
@@ -57,12 +57,30 @@ class FakeRemote implements DeployOps {
     this.appRunning = null;
     this.clock += 200;
   }
-  async startApp() {
+  onExit: ((code: number | null) => void) | null = null;
+  failReadyOf = new Set<string>();
+  /** What .deployed.json holds: the commit, or null when the file does not exist. */
+  deployedFile: string | null = null;
+  fileHistory: (string | null)[] = [];
+  async startApp(onExit: (code: number | null) => void) {
     this.calls.push(`start ${this.checkedOut![0]}`);
     this.appRunning = this.checkedOut;
+    this.onExit = onExit;
   }
   async waitReady() {
+    await new Promise((r) => setImmediate(r));
     this.clock += 700;
+    if (this.appRunning && this.failReadyOf.has(this.appRunning)) throw new Error('/card did not answer 200');
+  }
+  async recordDeployed(commit: string | null) {
+    this.deployedFile = commit;
+    this.fileHistory.push(commit);
+  }
+  /** The app dies by itself, as an exited process would report it. */
+  crash(code = 1) {
+    this.calls.push('crash');
+    this.appRunning = null;
+    this.onExit?.(code);
   }
 }
 
@@ -211,6 +229,136 @@ describe('DeployWatcher', () => {
     await expect(watcher.poll()).resolves.toBeUndefined();
     expect(logs[0]).toMatch(/could not resolve host/);
     expect(watcher.deployed).toBeNull();
+  });
+});
+
+describe('.deployed.json', () => {
+  it('is written after the first deploy and rewritten after a redeploy forwards and backwards', async () => {
+    const { remote, pollAndSettle } = setup();
+    await pollAndSettle();
+    expect(remote.deployedFile).toBe(A);
+    remote.head = B;
+    await pollAndSettle();
+    expect(remote.deployedFile).toBe(B);
+    remote.head = A;
+    await pollAndSettle();
+    expect(remote.deployedFile).toBe(A);
+    expect(remote.fileHistory).toEqual([A, B, A]);
+  });
+
+  it('is not touched by a failed build', async () => {
+    const { remote, pollAndSettle } = setup();
+    await pollAndSettle();
+    remote.failBuildOf.add(B);
+    remote.head = B;
+    await pollAndSettle();
+    expect(remote.fileHistory).toEqual([A]);
+  });
+
+  it('is removed on shutdown, and nothing deploys after it', async () => {
+    const { remote, watcher, pollAndSettle } = setup();
+    await pollAndSettle();
+    await watcher.shutdown();
+    expect(remote.deployedFile).toBeNull();
+    remote.head = B;
+    remote.calls = [];
+    await pollAndSettle();
+    expect(actions(remote.calls)).toEqual([]);
+  });
+
+  it('is removed after a failed restart that could not bring the old commit back', async () => {
+    const { remote, watcher, logs, pollAndSettle } = setup();
+    await pollAndSettle();
+    remote.failReadyOf.add(B).add(A);
+    remote.head = B;
+    await pollAndSettle();
+    expect(logs.some((l) => /Could not bring back aaaaaaa/.test(l))).toBe(true);
+    expect(watcher.deployed).toBeNull();
+    expect(remote.deployedFile).toBeNull();
+    expect(remote.fileHistory).toEqual([A, null]);
+  });
+
+  it('keeps the old commit after a failed restart that recovered', async () => {
+    const { remote, watcher, pollAndSettle } = setup();
+    await pollAndSettle();
+    remote.failReadyOf.add(B);
+    remote.head = B;
+    await pollAndSettle();
+    expect(watcher.deployed).toBe(A);
+    expect(remote.deployedFile).toBe(A);
+  });
+});
+
+describe('an app that exits by itself', () => {
+  it('is started again from the same build (no fetch, no build), once, with one log line', async () => {
+    const { remote, watcher, logs, records, pollAndSettle } = setup();
+    await pollAndSettle();
+    remote.calls = [];
+    remote.crash(1);
+    await watcher.idle();
+    expect(actions(remote.calls)).toEqual(['crash', 'start a']);
+    expect(remote.appRunning).toBe(A);
+    expect(logs.filter((l) => /exited \(code 1\); restarted it, \/card answered 200 after/.test(l))).toHaveLength(1);
+    expect(records).toHaveLength(1); // a restart is not a redeploy
+    expect(remote.deployedFile).toBe(A);
+    remote.calls = [];
+    await pollAndSettle(); // stays up the second time: nothing more happens
+    expect(actions(remote.calls)).toEqual([]);
+  });
+
+  it('after 3 restarts within 60 s a 4th exit ends in one give-up line, no loop, and the file removed', async () => {
+    const { remote, watcher, logs } = setup();
+    await watcher.poll();
+    await watcher.idle();
+    for (let i = 0; i < 4; i++) {
+      remote.crash(1);
+      await watcher.idle();
+      remote.clock += 1_000;
+    }
+    expect(remote.calls.filter((c) => c === 'start a')).toHaveLength(4); // the deploy and 3 restarts
+    expect(logs.filter((l) => /giving up/.test(l))).toHaveLength(1);
+    expect(logs.find((l) => /giving up/.test(l))).toMatch(/after 3 restarts within 60 s/);
+    expect(remote.deployedFile).toBeNull();
+    expect(remote.appRunning).toBeNull();
+  });
+
+  it('restarts again once the earlier restarts are more than 60 s old', async () => {
+    const { remote, watcher, logs } = setup();
+    await watcher.poll();
+    await watcher.idle();
+    for (let i = 0; i < 3; i++) {
+      remote.crash(1);
+      await watcher.idle();
+    }
+    remote.clock += 61_000;
+    remote.crash(1);
+    await watcher.idle();
+    expect(logs.some((l) => /giving up/.test(l))).toBe(false);
+    expect(remote.appRunning).toBe(A);
+  });
+
+  it('an exit reported after shutdown starts nothing', async () => {
+    const { remote, watcher } = setup();
+    await watcher.poll();
+    await watcher.idle();
+    await watcher.shutdown();
+    remote.calls = [];
+    remote.onExit?.(1);
+    await watcher.idle();
+    expect(actions(remote.calls)).toEqual([]);
+  });
+});
+
+describe('isRequestLogLine', () => {
+  it('hides the app request-log JSON and keeps everything else', () => {
+    expect(isRequestLogLine('{"time":"2026-11-13T21:13:00.487Z","level":"info","method":"GET","path":"/card","status":200,"ms":34}')).toBe(true);
+    expect(isRequestLogLine('  {"method":"GET","path":"/account","status":500}  ')).toBe(true);
+    expect(isRequestLogLine('Demo Bank listening on http://localhost:3000')).toBe(false);
+    expect(isRequestLogLine('> node dist-server/index.js')).toBe(false);
+    expect(isRequestLogLine('{"level":"error","msg":"boom"}')).toBe(false); // JSON, but not a request line
+    expect(isRequestLogLine('{"method":"GET","path":"/card"')).toBe(false); // cut off
+    expect(isRequestLogLine('[{"method":"GET","path":"/card","status":200}]')).toBe(false);
+    expect(isRequestLogLine('Error: listen EADDRINUSE {"method":"GET","path":"/card","status":200}')).toBe(false);
   });
 });
 
