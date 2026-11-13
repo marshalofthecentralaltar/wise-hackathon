@@ -11,7 +11,8 @@
     "reset": "tsx scripts/reset.ts",
     "thin": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env src/thin.ts",
     "tool": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env src/main.ts",
-    "time-fix": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/time-fix.ts"
+    "time-fix": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/time-fix.ts",
+    "deploy-watch": "tsx scripts/deploy-watch.ts"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
