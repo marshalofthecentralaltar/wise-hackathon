@@ -60,6 +60,25 @@ export interface FixStepDetails extends FixOutcome {
 
 const secondsSince = (t0: number) => Math.round((performance.now() - t0) / 100) / 10;
 
+/**
+ * Splits the fix model's answer into its "Title:" line and the rest. The title is model text, so it
+ * is cleaned and capped, and dropped (null) when it is missing, too short or too long.
+ */
+export function parseFixAnswer(answer: string): { title: string | null; changed: string } {
+  const lines = (answer ?? '').split(/\r?\n/);
+  const at = lines.findIndex((l) => /^\s*\**\s*title\s*:/i.test(l));
+  if (at < 0) return { title: null, changed: answer ?? '' };
+  const raw = plain(lines[at]!.replace(/^\s*\**\s*title\s*:\s*\**/i, '').replace(/[`*"]/g, ''));
+  const changed = lines.filter((_, i) => i !== at).join('\n').trim();
+  const title = raw.length >= 10 && raw.length <= 72 ? raw.replace(/\.$/, '') : null;
+  return { title, changed };
+}
+
+/** The pull request title: the model's when it gave a usable one, otherwise "Fix: <the reports' summary>". */
+export function fixTitle(answer: string, summary: string): string {
+  return parseFixAnswer(answer).title ?? plain(`Fix: ${summary}`).slice(0, 100);
+}
+
 /** No em or en dashes in anything the tool writes for people. */
 export function plain(text: string): string {
   return text.replace(/\s*[—–]\s*/g, ', ').replace(/\s+/g, ' ').trim();
@@ -113,7 +132,7 @@ export function buildFixStepPrompt(input: FixStepInput): string {
     '',
     `Make the smallest change that fixes this. Change only files under ${input.owner.codePath}; keep the page doing everything else exactly as now.`,
     'Read the file first, then edit it. Do not run tests, do not commit and do not create branches: the tool does that. Do not add dependencies.',
-    'End with one line saying what you changed and nothing else: no word about tests, the tool runs them.',
+    'End with exactly two lines and nothing after them. Line 1: "Title: " and a pull request title a developer would write, under 70 characters, naming the code change (for example "Cache the exchange rate lookup in QuoteForm"), not the symptom. Line 2: one sentence saying what you changed. No word about tests: the tool runs them.',
   ].join('\n');
 }
 
@@ -176,7 +195,7 @@ export async function fixStepWithDetails(input: FixStepInput, opts: FixStepOptio
       signal: budget.signal,
       onModelSpawn: opts.onModelSpawn,
       branchName: fixBranch,
-      title: plain(`Fix: ${group.summary}`).slice(0, 100),
+      title: ({ claudeSummary }) => fixTitle(claudeSummary, group.summary),
       body: ({ filesChanged, testCmd, claudeSummary }) =>
         [
           `${count} customer ${reportWord} described this problem: ${plain(group.summary)}`,
@@ -184,7 +203,7 @@ export async function fixStepWithDetails(input: FixStepInput, opts: FixStepOptio
           `The investigation found the cause in commit ${short}${investigation.pullRequestUrl ? ` (${investigation.pullRequestUrl})` : ''}, in ${investigation.file} lines ${investigation.lines}.`,
           plain(investigation.whatIsWrong),
           '',
-          `What was changed: ${plain(claudeSummary || 'see the diff')}`,
+          `What was changed: ${plain(parseFixAnswer(claudeSummary).changed || 'see the diff')}`,
           `Files changed: ${filesChanged.join(', ')}.`,
           `The tool checked that every changed file is under ${owner.codePath} and ran ${testCmd}: passing.`,
           `Written by Claude Code (model ${model}). Nothing is merged until a person approves it.`,
