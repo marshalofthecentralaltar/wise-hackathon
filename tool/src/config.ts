@@ -1,6 +1,7 @@
 // Settings for a run. Every value can be overridden by an environment variable of the same name.
 // Addresses and names come from docs/CONTEXT.md, "Contracts".
 
+import { paths } from './paths.js';
 import type { Page } from './types.js';
 
 const env = (name: string, fallback: string): string => (process.env[name] ?? '').trim() || fallback;
@@ -16,7 +17,7 @@ export const config = {
   appBaseUrl: env('APP_BASE_URL', 'http://localhost:3000'),
   prometheusUrl: env('PROMETHEUS_URL', 'http://localhost:9090'),
   /** The card app's request log, one JSON object per line. */
-  requestLogFile: env('REQUEST_LOG_FILE', 'C:/Users/ralfs/wise-build/demo-bank-card-app-deploy/logs/requests.log'),
+  requestLogFile: paths.requestLogFile, // REQUEST_LOG_FILE overrides (src/paths.ts)
   /** How far back step 4 lists commits. */
   recentDays: Number(env('RECENT_DAYS', '7')),
   /** Seconds step 8 waits for a tested fix before it pushes a branch that undoes the commit. */

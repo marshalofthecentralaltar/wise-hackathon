@@ -9,12 +9,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "reset": "tsx scripts/reset.ts",
-    "thin": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env src/thin.ts",
-    "tool": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env src/main.ts",
-    "time-fix": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/time-fix.ts",
+    "thin": "tsx --import ./src/loadSecrets.ts src/thin.ts",
+    "tool": "tsx --import ./src/loadSecrets.ts src/main.ts",
+    "time-fix": "tsx --import ./src/loadSecrets.ts scripts/time-fix.ts",
     "deploy-watch": "tsx scripts/deploy-watch.ts",
-    "post-reports": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/post-reports.ts",
-    "full-run": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/full-run.ts",
+    "doctor": "tsx scripts/doctor.ts",
+    "post-reports": "tsx --import ./src/loadSecrets.ts scripts/post-reports.ts",
+    "full-run": "tsx --import ./src/loadSecrets.ts scripts/full-run.ts",
     "counted-runs": "tsx scripts/counted-runs.ts",
     "demo-start": "tsx scripts/demo-start.ts",
     "demo-stop": "tsx scripts/demo-stop.ts"
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "playwright-core": "^1.65.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

@@ -1,6 +1,6 @@
 // Reads one #support thread back from Slack (conversations.replies) into a text file: each
 // message's text, and the handoff's blocks as stored.
-//   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/read-thread.ts --thread <permalink or ts> --out artifacts/f-thread-flicker.txt
+//   npx tsx --import ./src/loadSecrets.ts scripts/read-thread.ts --thread <permalink or ts> --out artifacts/f-thread-flicker.txt
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { WebClient } from '@slack/web-api';

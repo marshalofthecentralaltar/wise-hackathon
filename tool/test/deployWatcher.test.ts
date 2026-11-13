@@ -1,6 +1,7 @@
 // The deploy watcher's logic with fake git, npm and app actions: no network, no processes.
 import { describe, expect, it } from 'vitest';
 import { DeployWatcher, isRequestLogLine, parseWatcherArgs, type DeployOps, type RedeployRecord } from '../src/deployWatcher.js';
+import { paths } from '../src/paths.js';
 
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
@@ -365,7 +366,7 @@ describe('isRequestLogLine', () => {
 describe('parseWatcherArgs', () => {
   it('has the defaults of the brief', () => {
     expect(parseWatcherArgs([])).toEqual({
-      dir: 'C:/Users/ralfs/wise-build/demo-bank-card-app-deploy',
+      dir: paths.deployDir,
       repo: 'marshalofthecentralaltar/demo-bank-card-app',
       remoteUrl: 'https://github.com/marshalofthecentralaltar/demo-bank-card-app.git',
       port: 3000,
