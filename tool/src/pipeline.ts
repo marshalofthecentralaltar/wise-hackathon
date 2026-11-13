@@ -11,7 +11,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
-import { buildHandoffMessage, customerSentence as defaultCustomerSentence, fallbackCustomerSentence } from './handoff.js';
+import { buildHandoffMessage, draftCustomerSentence, esc, finalCustomerSentence } from './handoff.js';
 import type { SlackPort } from './slackPost.js';
 import { listRecentChanges as defaultListRecentChanges } from './steps/changes.js';
 import { checkMonitoring as defaultCheckMonitoring } from './steps/monitoring.js';
@@ -40,8 +40,12 @@ export interface PipelineDeps {
   checkMonitoring?: (page: Page | null) => Promise<MonitoringFinding>;
   listRecentChanges?: () => Promise<RecentCommit[]>;
   findOwner?: (page: Page | null) => Promise<Owner>;
-  /** Part 8 of the handoff. Gets the strings it must not contain. The real model call when absent. */
-  customerSentence?: (group: ReportGroup, forbidden: string[]) => Promise<string>;
+  /**
+   * Part 8 of the handoff: the model's draft, or null when it failed. Started at the top of the run;
+   * the draft is checked against the owner, commit and file when the handoff is built. The real
+   * model call when absent.
+   */
+  customerSentence?: (group: ReportGroup) => Promise<string | null>;
   /** Seconds step 2 took for the message that completed the group, measured by the caller. */
   patternSeconds?: number;
   /** null writes no file. */
@@ -137,7 +141,7 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
     const step = err instanceof StepError ? err.step : 'handoff';
     const message = scrub(err instanceof Error ? err.message : String(err), ownerSecrets);
     log(`[pipeline ${group.id}] ${step} failed: ${err instanceof StepError && err.cause instanceof Error ? (err.cause.stack ?? message) : message}`);
-    await say(`Stopped while ${STEP_WORDS[step]}: ${message.slice(0, 300)}. No handoff was posted for these reports.`);
+    await say(`Stopped while ${STEP_WORDS[step]}: ${esc(message.slice(0, 300))}. No handoff was posted for these reports.`);
     result = { ok: false, failedStep: step, error: message, timings: timingsNow() };
   }
   await writeTimings(result.timings);
@@ -162,6 +166,11 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
 
   async function steps(): Promise<PipelineResult> {
     const n = group.reports.length;
+    // Part 8 needs only the group, so its model call starts now and runs beside every other step.
+    const draft = (deps.customerSentence ?? ((g) => draftCustomerSentence(g)))(group).catch((err) => {
+      log(`[pipeline ${group.id}] customer sentence threw: ${String(err)}`);
+      return null;
+    });
     await say(`${n} reports look like the same problem${group.page ? ` on the ${group.page} page` : ''}. Checking monitoring, recent changes and the owners file.`);
 
     // Report links for part 2. A missing link is not worth stopping for.
@@ -199,13 +208,6 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
         : 'The investigation could not name a commit. Judging severity.',
     );
 
-    // Part 8 starts now and runs beside the verdict and the fix.
-    const forbidden = [...ownerStrings(owner), investigation.commitSha?.slice(0, 7) ?? '', investigation.commitAuthor ?? '', investigation.file ?? ''].filter(Boolean);
-    const sentence = (deps.customerSentence ?? ((g, f) => defaultCustomerSentence(g, { forbidden: f, log })))(group, forbidden).catch((err) => {
-      log(`[pipeline ${group.id}] customer sentence threw: ${String(err)}`);
-      return null;
-    });
-
     const verdict: Verdict = await timed('verdict', secs, () => deps.code.judge({ group, monitoring, investigation, textEffect }));
     await say(
       verdict.severity === 'low'
@@ -220,12 +222,15 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
       // The handoff still matters without a pull request, so a failed fix does not stop the run.
       const message = scrub(err instanceof Error ? err.message : String(err), ownerSecrets);
       log(`[pipeline ${group.id}] fix failed: ${err instanceof StepError && err.cause instanceof Error ? (err.cause.stack ?? message) : message}`);
-      await say(`The fix step failed: ${message.slice(0, 300)}. The handoff follows without a pull request.`);
+      await say(`The fix step failed: ${esc(message.slice(0, 300))}. The handoff follows without a pull request.`);
       fix = { kind: 'none', prUrl: null, prNumber: null, branch: null, filesChanged: [], testsPassed: null, note: `the fix step failed: ${message.slice(0, 200)}`, seconds: secs.fix ?? 0 };
     }
 
     const handoff = await timed('handoff', secs, async () => {
-      const sentenceForCustomers = (await sentence) ?? fallbackCustomerSentence(group);
+      // What part 8 must not say, known only now: the owner, the commit, its author and the file.
+      const fileName = investigation.file?.split('/').at(-1) ?? '';
+      const forbidden = [...ownerStrings(owner), investigation.commitSha?.slice(0, 7) ?? '', investigation.commitAuthor ?? '', investigation.file ?? '', fileName].filter(Boolean);
+      const sentenceForCustomers = finalCustomerSentence(await draft, group, forbidden, log);
       const h: Handoff = { group, monitoring, owner, investigation, verdict, fix, sentenceForCustomers };
       return { h, message: buildHandoffMessage(h) };
     });

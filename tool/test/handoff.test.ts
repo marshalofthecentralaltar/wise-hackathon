@@ -100,6 +100,8 @@ describe('owner', () => {
   it('login known but not in Slack: names the login as plain text, tags nobody', () => {
     const m = buildHandoffMessage(handoff({ owner: { ...OWNER, slackUserId: null } }));
     expect(m.parts[5]!.text).toContain('ownerlogin on GitHub (not found in this Slack workspace)');
+    expect(m.parts.find((p) => p.id === 'fix')!.text).toContain('There is no "Approve fix" button because nobody in this Slack workspace is matched to the owner. Merge it on GitHub.');
+    expect(m.text).not.toContain('button merges');
     expect(m.text).not.toMatch(/<@[A-Z0-9]+>/);
     expect(m.blocks.some((b) => b.type === 'actions')).toBe(false);
   });

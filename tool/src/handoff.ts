@@ -102,7 +102,7 @@ function fixPart(h: Handoff): string {
   const what = f.kind === 'undo' ? 'undoes the commit above' : 'fixes it';
   const files = f.filesChanged.length ? ` It changes ${f.filesChanged.map(code).join(', ')}.` : '';
   const tests = f.testsPassed === true ? ' The tests passed.' : f.testsPassed === false ? ' The tests failed.' : '';
-  const who = h.owner.slackUserId ? ' Only the owner named here can approve it.' : ' Nobody in this Slack workspace is matched to the owner, so the button merges nothing; merge it on GitHub.';
+  const who = h.owner.slackUserId ? ' Only the owner named here can approve it.' : ' There is no "Approve fix" button because nobody in this Slack workspace is matched to the owner. Merge it on GitHub.';
   return `*Fix:* ${link(f.prUrl!, label)} ${what}.${files}${tests}${who}`;
 }
 
@@ -190,12 +190,14 @@ export type TextModel = (prompt: string, system: string) => Promise<{ ok: boolea
 
 const defaultModel: TextModel = (prompt, system) => askClaude(prompt, system, config.groupingModel, CUSTOMER_SENTENCE_TIMEOUT_MS);
 
-/** One model call; the fixed sentence when it fails, breaks a rule or takes more than 15 s. Never rejects. */
-export async function customerSentence(
+/**
+ * The model call alone: the draft sentence, or null when the call fails or takes more than 15 s.
+ * It needs only the group, so the pipeline starts it at the top of the run. Never rejects.
+ */
+export async function draftCustomerSentence(
   group: Pick<ReportGroup, 'summary' | 'page'>,
-  opts: { forbidden?: string[]; model?: TextModel; timeoutMs?: number; log?: (m: string) => void } = {},
-): Promise<string> {
-  const fallback = fallbackCustomerSentence(group);
+  opts: { model?: TextModel; timeoutMs?: number } = {},
+): Promise<string | null> {
   const model = opts.model ?? defaultModel;
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<null>((resolve) => {
@@ -203,18 +205,39 @@ export async function customerSentence(
   });
   try {
     const answer = await Promise.race([model(buildCustomerSentencePrompt(group), SYSTEM).catch(() => null), timeout]);
-    if (!answer || !answer.ok) {
-      opts.log?.('[handoff] customer sentence: model failed or timed out; using the fixed sentence');
-      return fallback;
-    }
-    const text = answer.text.trim().replace(/^"|"$/g, '');
-    const problem = customerSentenceProblem(text, opts.forbidden);
-    if (problem) {
-      opts.log?.(`[handoff] customer sentence rejected (${problem}); using the fixed sentence`);
-      return fallback;
-    }
-    return text;
+    return answer && answer.ok ? answer.text.trim().replace(/^"|"$/g, '') : null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * The sentence that goes into part 8: the draft when it passes every rule, with the owner, the
+ * commit and the file known by now as forbidden strings; otherwise the fixed sentence.
+ */
+export function finalCustomerSentence(
+  draft: string | null,
+  group: Pick<ReportGroup, 'page'>,
+  forbidden: string[] = [],
+  log?: (m: string) => void,
+): string {
+  const fallback = fallbackCustomerSentence(group);
+  if (draft === null) {
+    log?.('[handoff] customer sentence: model failed or timed out; using the fixed sentence');
+    return fallback;
+  }
+  const problem = customerSentenceProblem(draft, forbidden);
+  if (problem) {
+    log?.(`[handoff] customer sentence rejected (${problem}); using the fixed sentence`);
+    return fallback;
+  }
+  return draft;
+}
+
+/** Draft and check in one go. Never rejects. */
+export async function customerSentence(
+  group: Pick<ReportGroup, 'summary' | 'page'>,
+  opts: { forbidden?: string[]; model?: TextModel; timeoutMs?: number; log?: (m: string) => void } = {},
+): Promise<string> {
+  return finalCustomerSentence(await draftCustomerSentence(group, opts), group, opts.forbidden, opts.log);
 }

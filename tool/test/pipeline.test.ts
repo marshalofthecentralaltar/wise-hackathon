@@ -230,3 +230,46 @@ describe('PipelineQueue', () => {
     expect(investigations).toBe(1);
   });
 });
+
+describe('part 8 and error lines (review round 1)', () => {
+  it('the customer-sentence call starts before investigate is called', async () => {
+    const r = recordingSteps();
+    const order: string[] = [];
+    const code = { ...r.code, investigate: async (i: Parameters<CodeSteps['investigate']>[0]) => (order.push('investigate'), r.code.investigate(i)) };
+    await runPipeline(group(), deps(code, new FakeSlack(), {
+      customerSentence: async () => (order.push('sentence'), 'We know about the blinking picture and are working on it.'),
+      checkMonitoring: async () => (order.push('monitoring'), MONITORING),
+    }));
+    expect(order[0]).toBe('sentence');
+    expect(order.indexOf('sentence')).toBeLessThan(order.indexOf('investigate'));
+  });
+
+  for (const draft of ['ownerlogin is looking at it now.', 'Commit abcdef1 caused this and we are working on it.', 'The bug is in Card.tsx and we are working on it.']) {
+    it(`a draft naming the owner, the commit or the file falls back to the fixed sentence: "${draft}"`, async () => {
+      const slack = new FakeSlack();
+      const result = await runPipeline(group(), deps(recordingSteps().code, slack, { customerSentence: async () => draft }));
+      expect(result.handoff!.sentenceForCustomers).toBe('We know about this problem on the card page and our team is working on it.');
+      expect(slack.posted.at(-1)!.text).not.toContain(draft);
+    });
+  }
+
+  it('a draft that passes is used as it is', async () => {
+    const result = await runPipeline(group(), deps(recordingSteps().code, new FakeSlack(), { customerSentence: async () => 'We know the picture blinks and are working on it.' }));
+    expect(result.handoff!.sentenceForCustomers).toBe('We know the picture blinks and are working on it.');
+  });
+
+  it('error text with Slack mentions is escaped in the stop line and the fix-failed line', async () => {
+    const boom = () => Promise.reject(new Error('boom <!channel> <@U0CJEMEMMT2>'));
+    for (const over of [{ checkMonitoring: boom }, {}]) {
+      const r = recordingSteps(Object.keys(over).length ? {} : { fix: boom });
+      const slack = new FakeSlack();
+      await runPipeline(group(), deps(r.code, slack, over as Partial<PipelineDeps>));
+      const all = slack.posted.map((m) => m.text + JSON.stringify(m.blocks ?? []));
+      expect(all.some((t) => t.includes('boom &lt;!channel&gt;'))).toBe(true);
+      for (const t of all) {
+        expect(t).not.toContain('<!channel>');
+        expect(t).not.toContain('<@U0CJEMEMMT2>');
+      }
+    }
+  });
+});

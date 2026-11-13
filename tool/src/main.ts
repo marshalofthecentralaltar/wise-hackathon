@@ -9,12 +9,13 @@ import { readEnv } from './env.js';
 import { APPROVE_ACTION_ID } from './handoff.js';
 import { investigate } from './investigate.js';
 import { PipelineQueue, runPipeline } from './pipeline.js';
-import { isCustomerReportCandidate, type SlackMessageEvent } from './slack.js';
+import { makeMessageHandler } from './listener.js';
+import type { SlackMessageEvent } from './slack.js';
 import { webSlackPort, type SlackBlock } from './slackPost.js';
 import { standInFix } from './standInFix.js';
 import { findOwner, slackLookup } from './steps/owner.js';
 import { addReports } from './steps/reports.js';
-import type { CodeSteps, Report } from './types.js';
+import type { CodeSteps } from './types.js';
 import { classifyCustomerEffect, judge } from './verdict.js';
 
 const codeSteps: CodeSteps = {
@@ -59,22 +60,14 @@ async function main(): Promise<number> {
 
   const app = new App({ token: env.slackBotToken, appToken: env.slackAppToken, socketMode: true, logLevel: LogLevel.WARN });
 
-  app.event('message', async ({ event }) => {
-    try {
-      const msg = event as SlackMessageEvent;
-      if (msg.channel !== channelId || !isCustomerReportCandidate(msg, own)) return;
-      const report: Report = { channel: channelId, ts: msg.ts ?? '', sender: msg.user ?? msg.bot_id ?? '', text: msg.text ?? '' };
-      const t0 = performance.now();
-      const triggered = await addReports([report]);
-      const patternSeconds = (performance.now() - t0) / 1000;
-      for (const group of triggered) {
-        console.log(`[tool] ${group.id} reached ${group.reports.length} reports: ${group.summary}`);
-        void queue.enqueue(group, patternSeconds);
-      }
-    } catch (err) {
-      console.error(`[tool] message handler failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-    }
+  const onMessage = makeMessageHandler({
+    own,
+    channelId,
+    addReports,
+    enqueue: (group, patternSeconds) => queue.enqueue(group, patternSeconds),
+    log: (m) => console.log(m),
   });
+  app.event('message', async ({ event }) => onMessage(event as SlackMessageEvent));
 
   app.action(APPROVE_ACTION_ID, async ({ ack, body }) => {
     await ack();

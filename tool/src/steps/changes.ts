@@ -4,15 +4,45 @@
 // that carry the change.
 import { config } from '../config.js';
 import type { RecentCommit } from '../types.js';
-import { ghApi } from './exec.js';
+import { GhError, ghApi, spawnTool } from './exec.js';
 
 export type ApiGet = (path: string) => Promise<unknown>;
+
+// Each `gh api` call is a new process (about 1.1 s on the demo laptop, measured 13 Nov 2026), and
+// a run makes one per commit and pull request page. So gh is started once, for its login token,
+// and the same REST paths are fetched in this process. Same endpoints, same Accept header, same
+// answers. The token stays in memory and is never logged. When gh cannot give a token, every call
+// goes through `gh api` as before.
+let tokenPromise: Promise<string | null> | undefined;
+const ghToken = (): Promise<string | null> =>
+  (tokenPromise ??= spawnTool('gh', ['auth', 'token'], { timeoutMs: 15_000 }).then((r) => (r.code === 0 && r.stdout.trim() ? r.stdout.trim() : null)));
+
+export const githubRestApi: ApiGet = async (path) => {
+  const token = await ghToken();
+  if (!token) return ghApi(path);
+  let res: Response;
+  try {
+    res = await fetch(`https://api.github.com/${path}`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'demo-bank-triage' },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new GhError(`GET ${path} failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const text = await res.text();
+  if (!res.ok) throw new GhError(`GET ${path} failed (HTTP ${res.status}): ${text.slice(0, 300)}`);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new GhError(`GET ${path} did not return JSON`);
+  }
+};
 
 export interface ChangesOptions {
   repos?: readonly string[];
   days?: number;
   now?: Date;
-  /** `gh api` by default; tests pass a stub. */
+  /** GitHub's REST API with gh's login by default; tests pass a stub. */
   api?: ApiGet;
   /** gh processes at once. */
   concurrency?: number;
@@ -62,7 +92,7 @@ export async function listRecentChanges(opts: ChangesOptions = {}): Promise<Rece
   const repos = opts.repos ?? config.repos;
   const days = opts.days ?? config.recentDays;
   const now = opts.now ?? new Date();
-  const api: ApiGet = opts.api ?? ((path) => ghApi(path));
+  const api: ApiGet = opts.api ?? githubRestApi;
   const limit = opts.concurrency ?? 8;
   const since = new Date(now.getTime() - days * 86_400_000).toISOString();
 
