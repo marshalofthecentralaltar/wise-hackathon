@@ -14,7 +14,10 @@
     "time-fix": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/time-fix.ts",
     "deploy-watch": "tsx scripts/deploy-watch.ts",
     "post-reports": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/post-reports.ts",
-    "full-run": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/full-run.ts"
+    "full-run": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/full-run.ts",
+    "counted-runs": "tsx scripts/counted-runs.ts",
+    "demo-start": "tsx scripts/demo-start.ts",
+    "demo-stop": "tsx scripts/demo-stop.ts"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",

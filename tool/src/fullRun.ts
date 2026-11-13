@@ -139,6 +139,8 @@ export interface FullRunLine {
   /** The log file of the tool this run started as its own process (--via slack); null otherwise. */
   toolLog: string | null;
   toolPid: number | null;
+  /** Set by the script after it stopped that tool's process tree: true when the pid is gone. */
+  toolStopped: boolean | null;
   /** A reply in the thread that is not from the tool's bot (for example the old thin listener). */
   strangerReplies: string[];
   ok: boolean;
@@ -171,6 +173,7 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
     pageCheck: null,
     toolLog: null,
     toolPid: null,
+    toolStopped: null,
     strangerReplies: [],
     ok: false,
     failed: [],
