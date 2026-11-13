@@ -73,7 +73,19 @@ describe('investigate: the tool checks the answer', () => {
       mergedAt: '2026-11-13T09:30:00Z', pullRequestUrl: 'https://example.test/pull/1', revertsCleanly: true, customerEffect: 'appearance',
     });
     expect(git(repo.dir, 'status', '--porcelain')).toBe('');
-  });
+    // The page's diffs are in the prompt by default: the faulty commit's, not the merge's.
+    expect(s.prompts[0]).toContain(`<diff commit="${faulty}">`);
+    expect(s.prompts[0]).toContain('+setInterval(rerender, 1000)');
+    expect(s.prompts[0]).not.toContain(`<diff commit="${merge}">`);
+    // Reports are framed as untrusted text.
+    expect(s.prompts[0]).toMatch(/untrusted text/);
+  }, 30_000);
+
+  it('without inline diffs the prompt carries no diff', async () => {
+    const s = stub(good());
+    await investigateWithDetails({ group, owner, monitoring, commits }, { copyDir: repo.dir, askModel: s.ask, inlineDiffs: false });
+    expect(s.prompts[0]).not.toContain('<diff commit=');
+  }, 30_000);
 
   it('maps a merge commit to the commit inside it that changed those lines', async () => {
     const d = await run(stub(good({ commit: merge })).ask);

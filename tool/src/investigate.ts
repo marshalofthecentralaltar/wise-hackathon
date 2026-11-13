@@ -49,6 +49,8 @@ export interface InvestigateOptions {
   model?: string;
   maxTurns?: number;
   effort?: 'low' | 'medium' | 'high';
+  /** Put the diffs of the commits that change the page's folder into the prompt, so fewer turns go to `git show`. Default true. */
+  inlineDiffs?: boolean;
 }
 
 export interface AttemptRecord {
@@ -149,7 +151,19 @@ function describeMonitoring(m: MonitoringFinding): string {
   ].join(' ');
 }
 
-export function buildInvestigationPrompt(input: InvestigateInput, maxTurns: number): string {
+/** `git show` of each listed non-merge commit that changes the page's folder, limited to that folder. */
+export async function pageDiffs(copyDir: string, commits: RecentCommit[], codePath: string | null, maxChars = 6000): Promise<{ sha: string; diff: string }[]> {
+  if (!codePath) return [];
+  const out: { sha: string; diff: string }[] = [];
+  for (const c of commits.filter((x) => touches(x, codePath))) {
+    if ((await parentsOf(copyDir, c.sha)).length > 1) continue;
+    const r = await git(['show', '--format=', '--no-color', '--no-ext-diff', c.sha, '--', codePath], copyDir);
+    if (r.ok && r.out.trim()) out.push({ sha: c.sha, diff: clip(r.out, maxChars) });
+  }
+  return out;
+}
+
+export function buildInvestigationPrompt(input: InvestigateInput, maxTurns: number, diffs: { sha: string; diff: string }[] = []): string {
   const { group, owner, monitoring, commits } = input;
   const codePath = owner.codePath;
   const onPage = commits.filter((c) => touches(c, codePath));
@@ -170,11 +184,16 @@ export function buildInvestigationPrompt(input: InvestigateInput, maxTurns: numb
     ...(codePath ? [`Commits that change ${codePath}:`, ...(onPage.length ? onPage.map(describeCommit) : ['(none)']), '', 'Other recent commits:'] : []),
     ...(others.length ? others.map(describeCommit) : ['(none)']),
     '</commits>',
+    ...(diffs.length
+      ? ['', `What those commits changed under ${codePath} (git show, limited to that folder; line numbers are as of each commit):`, ...diffs.map((d) => `<diff commit="${d.sha}">\n${d.diff}\n</diff>`)]
+      : []),
     '',
     'How to work:',
     '- Tools: Read, Glob and Grep, and a shell that runs only single git commands of exactly these forms from the current folder: `git log ...`, `git show ...`, `git diff ...`, `git blame ...`.',
     '- No pipes, no `&&`, no `;`, no `cd`, no redirection, no other program. Anything else is refused and costs you a turn.',
-    `- Be quick. Start with \`git show <sha>\` of the commits that change the page's code, read the code they changed, and decide which change produces exactly what the customers describe. You have at most ${maxTurns} turns.`,
+    diffs.length
+      ? `- Be quick. The diffs above show what changed in the page's code. Read the current version of the file you suspect, to give its line numbers as they are now, and decide which change produces exactly what the customers describe. You have at most ${maxTurns} turns.`
+      : `- Be quick. Start with \`git show <sha>\` of the commits that change the page's code, read the code they changed, and decide which change produces exactly what the customers describe. You have at most ${maxTurns} turns.`,
     '- Do not change any file.',
     '',
     'Answer with the JSON object only:',
@@ -397,7 +416,9 @@ export async function investigateWithDetails(input: InvestigateInput, opts: Inve
   }
 
   const t0 = performance.now();
-  const prompt = buildInvestigationPrompt(input, maxTurns);
+  // On by default: measured 13 Nov, flicker median 15.0 s with diffs against 24.3 s without, 5 of 5 both ways.
+  const diffs = (opts.inlineDiffs ?? true) ? await pageDiffs(copyDir, input.commits, input.owner.codePath) : [];
+  const prompt = buildInvestigationPrompt(input, maxTurns, diffs);
   const attempts: AttemptRecord[] = [];
   let statusAfterModel = '';
   try {

@@ -1,5 +1,5 @@
 // Times steps 6 and 7 on one planted problem, N times, each run from a new fresh copy.
-//   npx tsx scripts/run-investigation.ts --problem flicker|amount [--runs 5] [--model sonnet] [--max-turns 15] [--effort low]
+//   npx tsx scripts/run-investigation.ts --problem flicker|amount [--runs 5] [--model sonnet] [--max-turns 15] [--effort low] [--no-inline-diffs]
 // Inputs that other lanes build (grouping, monitoring, recent changes, owner) are made here by hand
 // or by a throwaway helper; the real steps replace them in the full run.
 
@@ -24,13 +24,14 @@ function arg(name: string, fallback?: string): string | undefined {
 
 const problem = arg('problem');
 if (problem !== 'flicker' && problem !== 'amount') {
-  console.error('usage: --problem flicker|amount [--runs 5] [--model sonnet] [--max-turns 15] [--effort low]');
+  console.error('usage: --problem flicker|amount [--runs 5] [--model sonnet] [--max-turns 15] [--effort low] [--no-inline-diffs]');
   process.exit(2);
 }
 const runs = Number(arg('runs', '5'));
 const model = arg('model', config.investigationModel)!;
 const maxTurns = Number(arg('max-turns', '15'));
 const effortArg = arg('effort');
+const inlineDiffs = !process.argv.includes('--no-inline-diffs');
 const effort = effortArg === 'low' || effortArg === 'medium' || effortArg === 'high' ? effortArg : undefined;
 
 // ---- Inputs ---------------------------------------------------------------------------------
@@ -145,7 +146,7 @@ async function main() {
   const listCopy = await freshCopy(repo);
   const commits = await recentCommits(listCopy.dir);
   await listCopy.remove();
-  console.log(`problem ${problem}, model ${model}, max turns ${maxTurns}${effort ? `, effort ${effort}` : ''}; ${commits.length} recent commits listed by the stand-in for step 4 in ${secondsSince(tc)} s`);
+  console.log(`problem ${problem}, model ${model}, max turns ${maxTurns}${effort ? `, effort ${effort}` : ''}${inlineDiffs ? ', diffs in the prompt' : ', no diffs in the prompt'}; ${commits.length} recent commits listed by the stand-in for step 4 in ${secondsSince(tc)} s`);
 
   interface Row {
     run: number; commit: string; file: string; lines: string; codeEffect: CustomerEffect; textEffect: CustomerEffect;
@@ -164,7 +165,7 @@ async function main() {
       classifyS = secondsSince(tk);
       return e;
     });
-    const d = await investigateWithDetails({ group, owner, monitoring, commits }, { copyDir: copy.dir, model, maxTurns, effort });
+    const d = await investigateWithDetails({ group, owner, monitoring, commits }, { copyDir: copy.dir, model, maxTurns, effort, inlineDiffs });
     const verdict = await judge({ group, monitoring, investigation: d.investigation, textEffect: textEffectP });
     const textEffect = await textEffectP;
     const statusAfter = (await run('git', ['status', '--porcelain'], { cwd: copy.dir, timeoutMs: 10_000 })).stdout.trim();
@@ -217,7 +218,7 @@ async function main() {
 
   mkdirSync(join(toolDir, 'artifacts'), { recursive: true });
   const out = join(toolDir, 'artifacts', `run-${problem}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(out, JSON.stringify({ problem, model, maxTurns, effort, commits, rows, details }, null, 2));
+  writeFileSync(out, JSON.stringify({ problem, model, maxTurns, effort, inlineDiffs, commits, rows, details }, null, 2));
   console.log(`details: ${out}`);
 }
 
