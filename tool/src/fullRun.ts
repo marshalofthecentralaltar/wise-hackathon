@@ -116,6 +116,11 @@ export interface FullRunDeps {
   log(line: string): void;
   handoffWaitMs?: number;
   mergeWaitMs?: number;
+  /**
+   * How long the starting state waits for Prometheus to hold a fresh reading of the app. A reset that
+   * redeploys restarts the app, and Prometheus reads up=0 until its next scrape (every 15 s). Default 45 s.
+   */
+  monitoringWaitMs?: number;
 }
 
 export interface FullRunLine {
@@ -136,6 +141,8 @@ export interface FullRunLine {
   monitoringSource: MonitoringFinding['source'] | null;
   /** Where the tool's own step 3 read monitoring during the run (from its RunTimings line); null when not recorded. */
   runMonitoringSource: MonitoringFinding['source'] | null;
+  /** Seconds the starting state waited for a Prometheus reading (0 when the first read was one); null when not read. */
+  startMonitoringWaitSeconds: number | null;
   /** After a merge: 'checked' when the browser check ran on the redeployed page; otherwise why not. */
   pageCheck: string | null;
   /** The log file of the tool this run started as its own process (--via slack); null otherwise. */
@@ -173,6 +180,7 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
     monitoring: null,
     monitoringSource: null,
     runMonitoringSource: null,
+    startMonitoringWaitSeconds: null,
     pageCheck: null,
     toolLog: null,
     toolPid: null,
@@ -208,7 +216,15 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
   const page = PROBLEM_PAGE[d.problem];
   let finding: MonitoringFinding | null = null;
   try {
+    const waitStart = d.now();
+    const waitLimit = d.monitoringWaitMs ?? 45_000;
     finding = await d.monitoring(page);
+    while (finding.source !== 'prometheus' && d.now() - waitStart < waitLimit) {
+      d.log(`[full-run] monitoring came from ${finding.source}; waiting for Prometheus to read the app again (${secs(d.now() - waitStart)} s so far)`);
+      await d.sleep(5_000);
+      finding = await d.monitoring(page);
+    }
+    line.startMonitoringWaitSeconds = secs(d.now() - waitStart);
   } catch (err) {
     fail(`monitoring for the ${page} page could not be read before the run: ${err instanceof Error ? err.message : String(err)}`);
   }

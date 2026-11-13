@@ -213,6 +213,20 @@ describe('runFullCase: the starting state reads monitoring the way the tool will
     expect(relaxed.monitoringSource).toBe('metrics-endpoint');
   });
 
+  it('right after a reset Prometheus may read up=0 until its next scrape: the starting state waits for it, then goes on', async () => {
+    let reads = 0;
+    const recovering = async () => (++reads <= 2 ? quiet({ source: 'metrics-endpoint', summary: 'Prometheus has no fresh reading of the app' }) : quiet());
+    const line = await runFullCase(world('amount', { requirePrometheus: true, monitoring: recovering, timingsSince: async () => ({ groupId: 'group-1', startedAt: 'x', secondsByStep: {}, totalSeconds: 40, monitoringSource: 'prometheus' }) }).deps);
+    expect(reads).toBe(3);
+    expect(line.ok).toBe(true);
+    expect(line.monitoringSource).toBe('prometheus');
+    expect(line.startMonitoringWaitSeconds).toBe(10);
+    // Never more than the limit: a fallback that lasts fails after about 45 s of waiting.
+    const stuck = await runFullCase(world('amount', { requirePrometheus: true, monitoring: async () => quiet({ source: 'metrics-endpoint', summary: 'x' }) }).deps);
+    expect(stuck.ok).toBe(false);
+    expect(stuck.startMonitoringWaitSeconds).toBe(45);
+  });
+
   it('--require-prometheus: the tool\'s own step 3 reading from /metrics during the run fails it; the line names the source', async () => {
     const timings = (src?: 'prometheus' | 'metrics-endpoint') => async () => ({ groupId: 'group-1', startedAt: 'x', secondsByStep: {}, totalSeconds: 40, ...(src ? { monitoringSource: src } : {}) });
     const fellBack = await runFullCase(world('amount', { requirePrometheus: true, timingsSince: timings('metrics-endpoint') }).deps);
