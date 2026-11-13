@@ -124,6 +124,32 @@ export interface FixOutcome {
   seconds: number;
 }
 
+/** Step 8 input: what the fix step is given. It acts only when verdict.severity is 'low'. */
+export interface FixStepInput {
+  group: ReportGroup;
+  owner: Owner;
+  investigation: Investigation;
+  verdict: Verdict;
+}
+
+/**
+ * Steps 6 to 8 as the pipeline calls them. The pipeline takes these injected, so it runs in tests
+ * with stand-ins and in the tool with the real functions (investigate, classifyCustomerEffect,
+ * judge, fixStep). The pipeline starts classifyCustomerEffect together with investigate and passes
+ * the promise to judge as textEffect.
+ */
+export interface CodeSteps {
+  investigate(input: { group: ReportGroup; owner: Owner; monitoring: MonitoringFinding; commits: RecentCommit[] }): Promise<Investigation>;
+  classifyCustomerEffect(reportTexts: string[]): Promise<Investigation['customerEffect']>;
+  judge(input: {
+    group: ReportGroup;
+    monitoring: MonitoringFinding;
+    investigation: Investigation;
+    textEffect?: Investigation['customerEffect'] | Promise<Investigation['customerEffect']>;
+  }): Promise<Verdict>;
+  fix(input: FixStepInput): Promise<FixOutcome>;
+}
+
 /** Step 9. Everything the handoff message needs, in the order of docs/CONTEXT.md "The handoff". */
 export interface Handoff {
   group: ReportGroup;
