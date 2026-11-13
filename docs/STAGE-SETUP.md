@@ -5,9 +5,11 @@ Windows laptop of a teammate (Nadim or Roger), set up on the morning of 14 Novem
 takes about 20 minutes when nothing is missing (guess; the steps below say which times were
 measured on the build PC on 13 November and which are guesses).
 
-Every line in a grey box is pasted into a terminal. "Terminal" means Windows Terminal or
-PowerShell, opened from the Start menu. After an install step, close the terminal and open a new
-one, so the new program is found.
+Every line in a grey box is pasted into Command Prompt (cmd.exe): Start menu, type "Command
+Prompt", open it. Do not use PowerShell: on a new Windows 11 laptop it refuses `npm` with
+"running scripts is disabled on this system". (If you are already in PowerShell, type `npm.cmd`
+wherever this page says `npm`.) After an install step, close Command Prompt and open a new one,
+so the new program is found.
 
 The demo itself (who says what, what to do when a step fails) is in [runbook.md](runbook.md).
 The addresses, channel and repository names are in [CONTEXT.md](CONTEXT.md), section "Contracts".
@@ -36,8 +38,8 @@ installed on the build PC (version 2.1.325, from npm):
 npm install -g @anthropic-ai/claude-code
 ```
 
-Takes about 1 minute (guess). Anthropic's own installer (`irm https://claude.ai/install.ps1 | iex`)
-also works for the tool, which finds either kind (not checked on this laptop type).
+Takes about 1 minute (guess). If Claude Code is already installed with Anthropic's own
+installer, keep it: the tool finds that kind too (not checked on this laptop type).
 
 Last, stop Claude Code from updating itself in the middle of the demo (it did once on 13 Nov):
 
@@ -88,7 +90,7 @@ works; this page uses `C:\wise-build`.
 
 ```
 mkdir C:\wise-build
-cd C:\wise-build
+cd /d C:\wise-build
 git clone https://github.com/marshalofthecentralaltar/wise-hackathon.git
 ```
 
@@ -97,7 +99,7 @@ The repository is private: the clone works once step 2 is done with an account t
 ## 6. Install the tool's packages (about 1 minute on a new laptop, guess; 5 s measured on the build PC with its download cache full)
 
 ```
-cd C:\wise-build\wise-hackathon\tool
+cd /d C:\wise-build\wise-hackathon\tool
 npm ci
 ```
 
@@ -110,8 +112,9 @@ not exist yet it makes an empty one with the four names:
 npm run doctor -- --offline
 ```
 
-It prints `MISSING secrets file: C:/wise-build/secrets.env did not exist; created it ...`. Open
-that file in Notepad:
+It prints `MISSING secrets file: C:/wise-build/secrets.env did not exist; created it ...`. An
+offline run never says the laptop is ready; that answer comes only from step 8. Open the secrets
+file in Notepad:
 
 ```
 notepad C:\wise-build\secrets.env
@@ -138,7 +141,8 @@ npm run doctor
 ```
 
 One line per item. `OK` is fine. `MISSING` names the exact fix: do it, then run the line again
-until the last line reads `READY: nothing is missing.`. A `WARN` about `DISABLE_AUTOUPDATER` means
+until the last line reads `READY: nothing is missing.` (a last line starting `OFFLINE CHECK ONLY`
+means `-- --offline` was typed: run the line exactly as above). A `WARN` about `DISABLE_AUTOUPDATER` means
 step 1's `setx` line was skipped or the terminal was not reopened. The first run also prepares
 the packages the fix step needs (about 18 s when it has to install them, measured 13 Nov), so the
 demo does not wait for them.

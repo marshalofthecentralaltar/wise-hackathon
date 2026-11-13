@@ -108,6 +108,18 @@ describe('doctor on a ready machine', () => {
     expect(f.calls).toEqual(['git --version', 'gh --version']);
     expect(r.items.filter((i) => i.status === 'SKIP').map((i) => i.name)).toEqual(['gh login and access', 'claude answers', 'Slack', 'fix step dependencies warm']);
     expect(r.exit).toBe(0);
+    // A teammate who reads READY stops: an offline run must never say it.
+    expect(r.text).not.toContain('READY: nothing is missing.');
+    expect(r.text.trim().split('\n').at(-1)).toBe('OFFLINE CHECK ONLY: 4 items skipped; run npm run doctor (without --offline) for the real answer.');
+  });
+
+  it('one SKIP alone is enough to withhold READY, and MISSING still wins over SKIP', () => {
+    const ok: Item = { status: 'OK', name: 'node', detail: 'v22' };
+    const skip: Item = { status: 'SKIP', name: 'Slack', detail: 'skipped (--offline)' };
+    const missing: Item = { status: 'MISSING', name: 'git', detail: 'not found', fix: 'winget install --id Git.Git -e' };
+    expect(formatItems([ok], []).split('\n').at(-1)).toBe('READY: nothing is missing.');
+    expect(formatItems([ok, skip], []).split('\n').at(-1)).toBe('OFFLINE CHECK ONLY: 1 items skipped; run npm run doctor (without --offline) for the real answer.');
+    expect(formatItems([ok, skip, missing], []).split('\n').at(-1)).toMatch(/^NOT READY: 1 missing\./);
   });
 });
 

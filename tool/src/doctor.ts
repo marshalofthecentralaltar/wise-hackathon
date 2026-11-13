@@ -252,7 +252,11 @@ export function redact(text: string, secrets: string[]): string {
 export function formatItems(items: Item[], secrets: string[]): string {
   const lines = items.map((i) => `${i.status.padEnd(7)} ${i.name}: ${i.detail}${i.fix ? ` | fix: ${i.fix}` : ''}`);
   const missingCount = items.filter((i) => i.status === 'MISSING').length;
-  lines.push(missingCount === 0 ? 'READY: nothing is missing.' : `NOT READY: ${missingCount} missing. Fix the MISSING lines in order, then run npm run doctor again.`);
+  const skipCount = items.filter((i) => i.status === 'SKIP').length;
+  // READY is said only when every item was actually checked: a SKIP is not a pass.
+  if (missingCount > 0) lines.push(`NOT READY: ${missingCount} missing. Fix the MISSING lines in order, then run npm run doctor again.`);
+  else if (skipCount > 0) lines.push(`OFFLINE CHECK ONLY: ${skipCount} items skipped; run npm run doctor (without --offline) for the real answer.`);
+  else lines.push('READY: nothing is missing.');
   return redact(lines.join('\n'), secrets);
 }
 
