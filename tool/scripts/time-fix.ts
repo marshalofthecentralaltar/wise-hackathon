@@ -35,7 +35,12 @@ async function main() {
       onStage: (stage, s) => console.log(`  run ${run} ${stage} ${s}s`),
     });
     results.push({ run, startedAt, result });
-    console.log(result.ok ? `run ${run}: ${result.prUrl} ${result.seconds.total}s, turns ${result.claudeTurns}` : `run ${run}: FAILED at ${result.stage}: ${result.message}\n${result.output}`);
+    const c = result.claude;
+    const claudeFacts = c
+      ? `claude exit ${c.exitCode}, ${c.numTurns} turns, ${c.durationMs} ms, mode ${c.permissionMode}, apiKeySource ${c.apiKeySource}, tools [${c.tools.join(',')}], permission denials ${c.permissionDenials.length}`
+      : 'claude did not run';
+    console.log(`  ${claudeFacts}`);
+    console.log(result.ok ? `run ${run}: ${result.prUrl} ${result.seconds.total}s` : `run ${run}: FAILED at ${result.stage}: ${result.message}\n${result.output}`);
   }
 
   const rows = results.map(({ run, result: r }) => [

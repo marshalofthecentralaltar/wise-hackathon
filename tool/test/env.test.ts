@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildChildEnv, readEnv, strippedNames } from '../src/env.js';
-import { claudeArgs } from '../src/fix.js';
+import { claudeArgs, parseClaudeJson } from '../src/fix.js';
 
 // The CLAUDE* names seen in this agent's own shell on 13 Nov 2026, plus the keys.
 const parent: NodeJS.ProcessEnv = {
@@ -69,6 +69,22 @@ describe('readEnv', () => {
     expect(readEnv({}).fixModel).toBe('sonnet');
     expect(readEnv({ FIX_MODEL: 'haiku' }).fixModel).toBe('haiku');
     expect(readEnv({}).slackBotToken).toBe('');
+  });
+});
+
+describe('parseClaudeJson', () => {
+  it('reads the array form (init message ... result message)', () => {
+    const out = JSON.stringify([
+      { type: 'system', subtype: 'init', apiKeySource: 'none', permissionMode: 'dontAsk', tools: ['Read', 'Edit'] },
+      { type: 'assistant' },
+      { type: 'result', result: 'Changed greet.mjs', is_error: false, num_turns: 4, duration_ms: 9000, permission_denials: [] },
+    ]);
+    const info = parseClaudeJson(out);
+    expect(info).toMatchObject({ apiKeySource: 'none', permissionMode: 'dontAsk', result: 'Changed greet.mjs', numTurns: 4, isError: false });
+  });
+  it('reads the single-object form and survives garbage', () => {
+    expect(parseClaudeJson(JSON.stringify({ type: 'result', result: 'x', is_error: true })).isError).toBe(true);
+    expect(parseClaudeJson('not json').result).toBe('');
   });
 });
 

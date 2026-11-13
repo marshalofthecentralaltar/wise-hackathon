@@ -25,6 +25,7 @@ export interface FixSuccess {
   filesChanged: string[];
   claudeSummary: string;
   claudeTurns: number | null;
+  claude: ClaudeRunInfo;
 }
 
 export interface FixFailure {
@@ -35,6 +36,7 @@ export interface FixFailure {
   seconds: StageSeconds;
   branch?: string;
   workdir: string;
+  claude?: ClaudeRunInfo;
 }
 
 export type FixResult = FixSuccess | FixFailure;
@@ -182,9 +184,10 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
     if (stage !== 'diff') seconds[stage] = s;
     onStage?.(stage, s);
   };
+  let claudeRun: ClaudeRunInfo | undefined;
   const fail = (stage: Stage, message: string, output: string, branch?: string): FixFailure => {
     seconds.total = secondsSince(tStart);
-    return { ok: false, stage, message, output: tail(output), seconds, branch, workdir };
+    return { ok: false, stage, message, output: tail(output), seconds, branch, workdir, claude: claudeRun };
   };
 
   // 1. Fresh shallow clone in a new temp folder.
@@ -205,16 +208,11 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
     input: buildFixPrompt(reportText),
   });
   done('claude', t0);
-  let claudeSummary = '';
-  let claudeTurns: number | null = null;
-  try {
-    const parsed = JSON.parse(claude.stdout) as { result?: string; num_turns?: number; is_error?: boolean };
-    claudeSummary = (parsed.result ?? '').trim();
-    claudeTurns = parsed.num_turns ?? null;
-    if (parsed.is_error) return fail('claude', 'claude reported an error', claude.stdout + claude.stderr);
-  } catch {
-    // fall through to the exit-code check
-  }
+  claudeRun = parseClaudeJson(claude.stdout);
+  claudeRun.exitCode = claude.code;
+  const claudeSummary = claudeRun.result;
+  const claudeTurns = claudeRun.numTurns;
+  if (claudeRun.isError) return fail('claude', 'claude reported an error', claude.stdout + claude.stderr);
   if (claude.timedOut) return fail('claude', `claude did not finish in ${CLAUDE_TIMEOUT_MS / 1000} s`, claude.stdout + claude.stderr);
   if (claude.code !== 0) return fail('claude', `claude exited with ${claude.code}`, claude.stdout + claude.stderr);
 
@@ -275,7 +273,50 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
 
   seconds.total = secondsSince(tStart);
   await rm(workdir, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
-  return { ok: true, prUrl, branch, seconds, filesChanged, claudeSummary, claudeTurns };
+  return { ok: true, prUrl, branch, seconds, filesChanged, claudeSummary, claudeTurns, claude: claudeRun };
+}
+
+export interface ClaudeRunInfo {
+  exitCode: number | null;
+  result: string;
+  isError: boolean;
+  numTurns: number | null;
+  durationMs: number | null;
+  /** from the init message: 'none' means the plan login was used, not an API key */
+  apiKeySource: string | null;
+  permissionMode: string | null;
+  tools: string[];
+  permissionDenials: unknown[];
+}
+
+/** `--output-format json` prints either the result object or an array of messages ending in it. */
+export function parseClaudeJson(stdout: string): ClaudeRunInfo {
+  const info: ClaudeRunInfo = {
+    exitCode: null, result: '', isError: false, numTurns: null, durationMs: null,
+    apiKeySource: null, permissionMode: null, tools: [], permissionDenials: [],
+  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return info;
+  }
+  const messages = (Array.isArray(parsed) ? parsed : [parsed]) as Record<string, unknown>[];
+  const init = messages.find((m) => m?.type === 'system' && m?.subtype === 'init');
+  const res = messages.find((m) => m?.type === 'result') ?? (Array.isArray(parsed) ? undefined : messages[0]);
+  if (init) {
+    info.apiKeySource = typeof init.apiKeySource === 'string' ? init.apiKeySource : null;
+    info.permissionMode = typeof init.permissionMode === 'string' ? init.permissionMode : null;
+    info.tools = Array.isArray(init.tools) ? (init.tools as string[]) : [];
+  }
+  if (res) {
+    info.result = typeof res.result === 'string' ? res.result.trim() : '';
+    info.isError = res.is_error === true;
+    info.numTurns = typeof res.num_turns === 'number' ? res.num_turns : null;
+    info.durationMs = typeof res.duration_ms === 'number' ? res.duration_ms : null;
+    info.permissionDenials = Array.isArray(res.permission_denials) ? res.permission_denials : [];
+  }
+  return info;
 }
 
 function firstLine(text: string): string {
