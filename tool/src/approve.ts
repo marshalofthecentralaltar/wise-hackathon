@@ -128,6 +128,12 @@ export async function handleApprovePress(press: ApprovePress, deps: ApproveDeps)
     } catch (err) {
       log(`[approve] merged, but the button could not be replaced: ${String(err)}`);
     }
+    if (press.unattended) {
+      // The pull request says "Nothing is merged until a person approves it": say on it that no person did.
+      const note = 'Merged by the rehearsal script on behalf of the owner named in the Slack handoff. No person pressed "Approve fix" for this pull request.';
+      const c = await gh(['pr', 'comment', String(value.pr), '--repo', value.repo, '--body', note]);
+      if (c.code !== 0) log(`[approve] merged, but the rehearsal note could not be added to #${value.pr}: ${(c.stderr || c.stdout).trim().split('\n')[0] ?? ''}`);
+    }
     log(`[approve] merged ${key} for ${press.userId}`);
     return 'merged';
   } finally {
