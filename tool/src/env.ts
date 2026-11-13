@@ -1,5 +1,5 @@
 // Secrets come from the process environment, which is filled by
-// `node --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env` (see package.json).
+// src/loadSecrets.ts, which the npm scripts import first (the file's path is in src/paths.ts).
 // The file is read by path; it is never copied, printed or committed.
 
 export interface ToolEnv {

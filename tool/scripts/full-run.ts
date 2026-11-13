@@ -2,7 +2,7 @@
 // handoff in the thread, and with --approve the unattended approval, the merge and the page.
 // Prints one JSON line on stdout (progress on stderr); exit 0 only when the line says ok.
 // Run from tool/:
-//   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/full-run.ts \
+//   npx tsx --import ./src/loadSecrets.ts scripts/full-run.ts \
 //     --problem flicker|amount --via slack|direct [--approve] [--app-url http://localhost:3000] [--gap-seconds 3]
 // --via slack  : posts as "Support Desk" (SLACK_TEST_BOT_TOKEN); needs `npm run tool` running
 //                separately, started after the reset (it keeps its groups in memory).
@@ -11,7 +11,7 @@
 //                listener ignores by design) and hands each one to the listener's handler as a
 //                message whose sender is not the bot. Everything after that filter is the code
 //                path of a typed message.
-// The browser check is CHECK_FLICKER (default C:/Users/ralfs/wise-build/checks/check-flicker.mjs).
+// The browser check is CHECK_FLICKER (default tool/checks/check-flicker.mjs, see src/paths.ts).
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -26,6 +26,7 @@ import { webSlackPort } from '../src/slackPost.js';
 import { startTool, type RunningTool } from '../src/startTool.js';
 import { ghApi, spawnTool } from '../src/steps/exec.js';
 import type { RunTimings } from '../src/types.js';
+import { paths } from '../src/paths.js';
 import { SECRETS_FILE, emptyTestTokenMessage } from './lib/secretsLine.js';
 
 const arg = (name: string, fallback?: string) => {
@@ -53,7 +54,7 @@ if (via === 'slack' && !testToken) {
   console.error(`--via slack needs the second app. ${emptyTestTokenMessage(SECRETS_FILE)} Or run with --via direct (the fallback).`);
   process.exit(2);
 }
-const CHECK_FLICKER = (process.env.CHECK_FLICKER ?? '').trim() || 'C:/Users/ralfs/wise-build/checks/check-flicker.mjs';
+const CHECK_FLICKER = paths.checkFlicker; // CHECK_FLICKER overrides (src/paths.ts)
 if (problem === 'flicker' && !existsSync(CHECK_FLICKER)) {
   console.error(`the browser check is not at ${CHECK_FLICKER} (set CHECK_FLICKER)`);
   process.exit(2);

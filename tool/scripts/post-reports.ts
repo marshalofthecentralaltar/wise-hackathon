@@ -2,7 +2,7 @@
 // messages, a few seconds apart, from the second Slack app ("Support Desk", SLACK_TEST_BOT_TOKEN),
 // the way a support integration would. A separately running `npm run tool` picks them up.
 // Run from tool/:
-//   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/post-reports.ts --problem flicker|amount [--gap-seconds 3]
+//   npx tsx --import ./src/loadSecrets.ts scripts/post-reports.ts --problem flicker|amount [--gap-seconds 3]
 // Exit 2 when the token is empty or the arguments are wrong.
 import { WebClient } from '@slack/web-api';
 import { pickReports, type Problem } from '../src/fullRun.js';

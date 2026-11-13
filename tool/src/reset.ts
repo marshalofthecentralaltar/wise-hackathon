@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { config } from './config.js';
 import { toolGitIdentity } from './fix.js';
 import { TOOL_BRANCH_PREFIX } from './fixStep.js';
+import { paths } from './paths.js';
 import { ghApi, spawnTool } from './steps/exec.js';
 import { clearReportState } from './steps/reports.js';
 
@@ -38,7 +39,7 @@ export const PLANTED_MAIN = (process.env.RESET_EXPECTED_MAIN ?? '').trim() || PL
 /** The branch the restore may move. Never any other. */
 const RESTORE_BRANCH = 'main';
 
-export const DEFAULT_DEPLOY_DIR = (process.env.CARD_APP_DEPLOY_DIR ?? '').trim() || 'C:/Users/ralfs/wise-build/demo-bank-card-app-deploy';
+export const DEFAULT_DEPLOY_DIR = paths.deployDir; // CARD_APP_DEPLOY_DIR overrides (src/paths.ts)
 export const DEPLOY_WAIT_MS = 90_000;
 
 export interface AheadCommit {

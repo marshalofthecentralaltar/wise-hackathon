@@ -1,7 +1,8 @@
 // Which line of the secrets file holds SLACK_TEST_BOT_TOKEN. Reads names only; never a value.
 import { existsSync, readFileSync } from 'node:fs';
+import { paths } from '../../src/paths.js';
 
-export const SECRETS_FILE = (process.env.SECRETS_FILE ?? '').trim() || 'C:/Users/ralfs/wise-build/secrets.env';
+export const SECRETS_FILE = (process.env.SECRETS_FILE ?? '').trim() || paths.secretsFile;
 
 export function emptyTestTokenMessage(path: string): string {
   let where = `add a line SLACK_TEST_BOT_TOKEN=... to ${path}`;

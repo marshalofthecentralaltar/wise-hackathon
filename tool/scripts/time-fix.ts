@@ -1,5 +1,5 @@
 // Times writeFixPullRequest N times in a row, each from a fresh clone and a new branch.
-// npx tsx --env-file=C:/Users/ralfs/wise-build/secrets.env scripts/time-fix.ts [--model sonnet] [--runs 5]
+// npx tsx --import ./src/loadSecrets.ts scripts/time-fix.ts [--model sonnet] [--runs 5]
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { readEnv, strippedNames } from '../src/env.js';
 import { claudeArgs, writeFixPullRequest, type FixResult } from '../src/fix.js';

@@ -3,8 +3,8 @@
 // the stand-in fix. The owner's Slack id is replaced by the bot's own id, so no person is pinged.
 // The bot ignores its own messages, so this goes straight to the pipeline, not through the listener.
 // Run from tool/:
-//   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/live-thread.ts --problem flicker
-//   npx tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/live-thread.ts --problem amount
+//   npx tsx --import ./src/loadSecrets.ts scripts/live-thread.ts --problem flicker
+//   npx tsx --import ./src/loadSecrets.ts scripts/live-thread.ts --problem amount
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { WebClient } from '@slack/web-api';
