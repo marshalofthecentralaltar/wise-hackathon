@@ -24,6 +24,8 @@ class FakeRemote implements DeployOps {
     return this.head;
   }
   async fetch(commit: string) {
+    // Yield to the event loop, so a deploy loop that never ends fails by timeout instead of hanging vitest.
+    await new Promise((r) => setImmediate(r));
     if (this.failFetches > 0) {
       this.failFetches--;
       throw new Error('network down');
@@ -181,8 +183,7 @@ describe('DeployWatcher', () => {
     await watcher.poll();
     remote.buildGate = null;
     release();
-    await watcher.idle();
-    await pollAndSettle();
+    await watcher.idle(); // no further poll: the newest commit seen during the build deploys straight away
     expect(watcher.deployed).toBe(D);
     expect(remote.appRunning).toBe(D);
     expect(records.map((r) => r.to[0])).toEqual(['a', 'b', 'd']);

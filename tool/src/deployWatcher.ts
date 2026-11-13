@@ -242,6 +242,8 @@ export class DeployWatcher {
   }
 }
 
+const READY_TIMEOUT_MS = 60_000;
+
 const tail = (text: string, lines = 15) => text.trim().split(/\r?\n/).slice(-lines).join('\n');
 
 /** True when nothing listens on the port (checked on every address, as the card app listens on all). */
@@ -349,7 +351,8 @@ export function realDeployOps(opts: WatcherOptions, log: (line: string) => void 
       });
     },
     async waitReady() {
-      const deadline = Date.now() + 30_000;
+      // 60 s: under load (a build or a browser running alongside) the app once took over 30 s to answer.
+      const deadline = Date.now() + READY_TIMEOUT_MS;
       let last = 'no answer';
       while (Date.now() < deadline) {
         if (appExited) throw new Error('the app exited before /card answered');
@@ -363,7 +366,7 @@ export function realDeployOps(opts: WatcherOptions, log: (line: string) => void 
         }
         await new Promise((r) => setTimeout(r, 100));
       }
-      throw new Error(`/card did not answer 200 within 30 seconds (last: ${last})`);
+      throw new Error(`/card did not answer 200 within ${READY_TIMEOUT_MS / 1000} seconds (last: ${last})`);
     },
   };
   return { ops, stopApp };
