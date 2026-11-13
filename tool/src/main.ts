@@ -12,7 +12,9 @@ import { PipelineQueue, runPipeline } from './pipeline.js';
 import { makeMessageHandler } from './listener.js';
 import type { SlackMessageEvent } from './slack.js';
 import { webSlackPort, type SlackBlock } from './slackPost.js';
-import { standInFix } from './standInFix.js';
+import { ensureDeps, unlinkDeps } from './deps.js';
+import { fixStep } from './fixStep.js';
+import { freshCopy } from './workspace.js';
 import { findOwner, slackLookup } from './steps/owner.js';
 import { addReports } from './steps/reports.js';
 import type { CodeSteps } from './types.js';
@@ -22,7 +24,7 @@ const codeSteps: CodeSteps = {
   investigate: (input) => investigate(input),
   classifyCustomerEffect: (texts) => classifyCustomerEffect(texts),
   judge,
-  fix: standInFix, // STAND-IN for step 8: swap for the real fix step at the join
+  fix: (input) => fixStep(input),
 };
 
 async function findChannelId(client: WebClient, name: string): Promise<string | undefined> {
@@ -99,7 +101,18 @@ async function main(): Promise<number> {
 
   await app.start();
   console.log(`Listening in #${config.supportChannel} (${channelId}) as ${own.botUserId}; a group acts at ${config.reportThreshold} reports. Ctrl+C stops.`);
-  console.log('Step 8 is a stand-in here: no pull request is opened until the fix step is joined.');
+  // Warm the dependency install and the repository mirror now, so the first fix does not pay a cold install (about 18 s, measured 13 Nov).
+  void (async () => {
+    try {
+      const copy = await freshCopy(config.repos[0]!);
+      const deps = await ensureDeps(copy.dir);
+      await unlinkDeps(copy.dir);
+      await copy.remove();
+      console.log(`[tool] dependencies for the fix step: ${deps.cold ? 'installed' : 'already warm'} in ${deps.seconds} s`);
+    } catch (err) {
+      console.error(`[tool] could not warm the fix step's dependencies: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  })();
   return new Promise<number>(() => undefined);
 }
 

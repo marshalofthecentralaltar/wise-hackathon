@@ -2,7 +2,7 @@
 // no user customisations, tools limited, answer as structured JSON. Used by the investigation
 // (step 6) and the text-only customer-effect check (step 7).
 
-import { parseClaudeJson, resolveClaudeExecutable, run, type ClaudeRunInfo } from './fix.js';
+import { parseClaudeJson, runModel, type ClaudeRunInfo } from './fix.js';
 
 export interface ClaudeQuestion {
   prompt: string;
@@ -19,6 +19,13 @@ export interface ClaudeQuestion {
   jsonSchema: object;
   timeoutMs: number;
   effort?: 'low' | 'medium' | 'high';
+  /**
+   * Confine Read, Glob, Grep and Edit to cwd with the CLI's own --restricted mode. Measured on
+   * 13 Nov (CLI 2.1.323): --restricted refuses a Read outside cwd; a path rule such as
+   * `Read(./**)` in --allowedTools does not (the decoy file outside cwd was read). The
+   * investigation and the fix step turn it on.
+   */
+  confineToCwd?: boolean;
 }
 
 export interface ClaudeAnswer {
@@ -29,13 +36,10 @@ export interface ClaudeAnswer {
   seconds: number;
   /** Tail of stdout and stderr, for a failure message. */
   rawTail: string;
+  /** All of stdout and stderr. */
+  raw: string;
 }
 
-let claudeExe: string | undefined;
-function claudeExecutable(): string {
-  claudeExe ??= resolveClaudeExecutable();
-  return claudeExe;
-}
 
 export function questionArgs(q: Omit<ClaudeQuestion, 'prompt' | 'cwd' | 'timeoutMs'>): string[] {
   const args = [
@@ -49,6 +53,7 @@ export function questionArgs(q: Omit<ClaudeQuestion, 'prompt' | 'cwd' | 'timeout
     '--permission-mode', 'dontAsk',
     '--permission-prompts', 'none',
   ];
+  if (q.confineToCwd) args.push('--restricted');
   if (q.allowedTools?.length) args.push('--allowedTools', ...q.allowedTools);
   if (q.disallowedTools?.length) args.push('--disallowedTools', ...q.disallowedTools);
   if (q.effort) args.push('--effort', q.effort);
@@ -85,7 +90,8 @@ export function extractStructured(stdout: string): unknown {
 
 export async function askClaude(q: ClaudeQuestion): Promise<ClaudeAnswer> {
   const t0 = performance.now();
-  const r = await run(claudeExecutable(), questionArgs(q), { cwd: q.cwd, timeoutMs: q.timeoutMs, input: q.prompt });
+  // runModel: the cached executable, resolved again and retried once when the model fails to start.
+  const r = await runModel(questionArgs(q), { cwd: q.cwd, timeoutMs: q.timeoutMs, input: q.prompt });
   const info = parseClaudeJson(r.stdout);
   info.exitCode = r.code;
   const raw = r.stdout + '\n' + r.stderr;
@@ -95,5 +101,6 @@ export async function askClaude(q: ClaudeQuestion): Promise<ClaudeAnswer> {
     timedOut: r.timedOut,
     seconds: Math.round((performance.now() - t0) / 100) / 10,
     rawTail: raw.length > 3000 ? '...' + raw.slice(-3000) : raw,
+    raw,
   };
 }

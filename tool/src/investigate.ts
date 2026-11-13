@@ -51,6 +51,10 @@ export interface InvestigateOptions {
   effort?: 'low' | 'medium' | 'high';
   /** Put the diffs of the commits that change the page's folder into the prompt, so fewer turns go to `git show`. Default true. */
   inlineDiffs?: boolean;
+  /** Confine the model's file tools to the copy (CLI --restricted). Default true; false only for the proof that the confinement matters. */
+  confineToCopy?: boolean;
+  /** Receives the model's whole raw output of each attempt; for the confinement proof. */
+  onModelOutput?: (raw: string) => void;
 }
 
 export interface AttemptRecord {
@@ -96,6 +100,10 @@ export const INVESTIGATION_DISALLOWED_TOOLS = [
   'Bash(*--output*)',
   'Bash(*--ext-diff*)',
   'Bash(*--textconv*)',
+  // These make git read a file named on the command line, which may lie outside the copy.
+  'Bash(*--no-index*)',
+  'Bash(*--contents*)',
+  'Bash(*--ignore-revs-file*)',
 ];
 
 const ANSWER_SCHEMA = {
@@ -344,7 +352,7 @@ export async function validateAnswer(copyDir: string, answer: ModelAnswer, commi
 // ---------------------------------------------------------------------------------------------
 // The run
 
-function claudeAsker(model: string, maxTurns: number, effort?: 'low' | 'medium' | 'high'): AskModel {
+function claudeAsker(model: string, maxTurns: number, effort?: 'low' | 'medium' | 'high', confineToCwd = true, onModelOutput?: (raw: string) => void): AskModel {
   return async (prompt, cwd) => {
     const q: ClaudeQuestion = {
       prompt,
@@ -357,8 +365,10 @@ function claudeAsker(model: string, maxTurns: number, effort?: 'low' | 'medium' 
       jsonSchema: ANSWER_SCHEMA,
       timeoutMs: CLAUDE_TIMEOUT_MS,
       effort,
+      confineToCwd,
     };
     const a: ClaudeAnswer = await askClaude(q);
+    onModelOutput?.(a.raw);
     const denials = a.info.permissionDenials.length;
     const note = a.timedOut
       ? `claude timed out after ${CLAUDE_TIMEOUT_MS / 1000} s`
@@ -403,7 +413,7 @@ function notFound(repo: string, whatIsWrong: string, effect: CustomerEffect, sec
 export async function investigateWithDetails(input: InvestigateInput, opts: InvestigateOptions = {}): Promise<InvestigationDetails> {
   const repo = input.owner.repo;
   const maxTurns = opts.maxTurns ?? 15;
-  const ask = opts.askModel ?? claudeAsker(opts.model ?? config.investigationModel, maxTurns, opts.effort);
+  const ask = opts.askModel ?? claudeAsker(opts.model ?? config.investigationModel, maxTurns, opts.effort, opts.confineToCopy ?? true, opts.onModelOutput);
 
   let copyDir = opts.copyDir;
   let removeCopy: (() => Promise<void>) | undefined;

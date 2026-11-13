@@ -2,7 +2,7 @@
 // fix.ts, which builds the child's environment with buildChildEnv: no Anthropic key, no
 // Slack token and no CLAUDE* variable reaches the child.
 import { tmpdir } from 'node:os';
-import { resolveClaudeExecutable, run, parseClaudeJson } from '../fix.js';
+import { run, parseClaudeJson, runModel } from '../fix.js';
 
 export interface ExecResult {
   code: number | null;
@@ -61,13 +61,8 @@ export function claudeAnswerArgs(model: string, systemPrompt: string): string[] 
 export async function askClaude(prompt: string, systemPrompt: string, model: string, timeoutMs = 60_000): Promise<ClaudeAnswer> {
   const t0 = performance.now();
   const seconds = () => Math.round((performance.now() - t0) / 100) / 10;
-  let exe: string;
-  try {
-    exe = resolveClaudeExecutable();
-  } catch (err) {
-    return { ok: false, text: '', error: String(err), seconds: seconds() };
-  }
-  const r = await spawnTool(exe, claudeAnswerArgs(model, systemPrompt), { input: prompt, timeoutMs });
+  // runModel: the cached executable, resolved again and retried once when the model fails to start. Never throws.
+  const r = await runModel(claudeAnswerArgs(model, systemPrompt), { cwd: tmpdir(), input: prompt, timeoutMs });
   const info = parseClaudeJson(r.stdout);
   if (r.timedOut) return { ok: false, text: info.result, error: `claude did not answer in ${timeoutMs / 1000} s`, seconds: seconds() };
   if (r.code !== 0 || info.isError) {

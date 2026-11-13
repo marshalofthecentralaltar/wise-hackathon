@@ -41,6 +41,14 @@ export async function judge(input: JudgeInput): Promise<Verdict> {
   if (monitoring.showsProblem) {
     return { severity: 'high', decidedBy: 'rule', reason: `Monitoring shows a problem on the page: ${monitoring.summary.trim() || 'errors, alerts or error log lines'}.` };
   }
+  // Rule 1b: monitoring could not be read, so the page's health is unknown.
+  if (monitoring.unavailable === true) {
+    return {
+      severity: 'high',
+      decidedBy: 'rule',
+      reason: "Monitoring could not be read, so the page's health is unknown, and when in doubt the verdict is high.",
+    };
+  }
   // Rule 2: no responsible commit.
   if (!investigation.found) {
     return { severity: 'high', decidedBy: 'rule', reason: 'The tool could not name the commit responsible, so the problem is treated as serious.' };
