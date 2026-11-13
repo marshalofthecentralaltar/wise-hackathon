@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card | Demo Bank</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="db-header">
+    <div class="db-header-inner">
+      <a class="db-brand" href="card.html">Demo Bank</a>
+      <nav class="db-nav" aria-label="Main">
+        <a class="db-nav-link db-nav-link-current" href="card.html" aria-current="page">Card</a>
+        <a class="db-nav-link" href="transfers.html">Transfers</a>
+        <a class="db-nav-link" href="account.html">Account</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="db-main">
+    <h1 class="db-page-title">Card</h1>
+    <p class="db-page-intro">Your card and recent payments.</p>
+
+    <div class="db-card-layout">
+      <div class="db-card-visual" id="card-picture" role="img" aria-label="Demo Bank card ending in 4821">
+        <div class="db-card-chip" aria-hidden="true"></div>
+        <p class="db-card-number">•••• •••• •••• 4821</p>
+        <div class="db-card-footer">
+          <span class="db-card-holder">A. TAMM</span>
+          <span class="db-card-expiry">11/29</span>
+        </div>
+      </div>
+
+      <section class="db-panel db-balance-panel" aria-label="Balance">
+        <h2 class="db-balance-label">Balance</h2>
+        <p class="db-balance"><span id="balance">1,240.50 EUR</span></p>
+        <p class="db-balance-note">Available to spend</p>
+      </section>
+    </div>
+
+    <section class="db-section" aria-label="Last card payments">
+      <h2 class="db-section-title">Last card payments</h2>
+      <ul class="db-payment-list">
+        <li class="db-payment-row">
+          <span class="db-payment-shop">Kohvik Lumi</span>
+          <span class="db-payment-date">12 Nov 2026</span>
+          <span class="db-payment-amount">6.80 EUR</span>
+        </li>
+        <li class="db-payment-row">
+          <span class="db-payment-shop">Toidupood Nurga</span>
+          <span class="db-payment-date">11 Nov 2026</span>
+          <span class="db-payment-amount">23.45 EUR</span>
+        </li>
+        <li class="db-payment-row">
+          <span class="db-payment-shop">Raamatupood Täht</span>
+          <span class="db-payment-date">9 Nov 2026</span>
+          <span class="db-payment-amount">18.90 EUR</span>
+        </li>
+        <li class="db-payment-row">
+          <span class="db-payment-shop">Kino Aurora</span>
+          <span class="db-payment-date">7 Nov 2026</span>
+          <span class="db-payment-amount">9.50 EUR</span>
+        </li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
