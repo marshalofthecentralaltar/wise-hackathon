@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transfers | Demo Bank</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="db-header">
+    <div class="db-header-inner">
+      <a class="db-brand" href="card.html">Demo Bank</a>
+      <nav class="db-nav" aria-label="Main">
+        <a class="db-nav-link" href="card.html">Card</a>
+        <a class="db-nav-link db-nav-link-current" href="transfers.html" aria-current="page">Transfers</a>
+        <a class="db-nav-link" href="account.html">Account</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="db-main">
+    <h1 class="db-page-title">Transfers</h1>
+    <p class="db-page-intro">Money you have sent recently.</p>
+
+    <section class="db-panel db-table-panel" aria-label="Recent transfers">
+      <h2 class="db-section-title">Recent transfers</h2>
+      <div class="db-table-wrap">
+        <table class="db-table" id="transfers-table">
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">Recipient</th>
+              <th scope="col" class="db-align-right">Amount</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Date">13 Nov 2026</td>
+              <td data-label="Recipient">Mari K.</td>
+              <td data-label="Amount" class="db-amount db-align-right">250.00 EUR</td>
+              <td data-label="Status"><span class="db-status db-status-arriving">Arriving</span></td>
+            </tr>
+            <tr>
+              <td data-label="Date">12 Nov 2026</td>
+              <td data-label="Recipient">Jaan T.</td>
+              <td data-label="Amount" class="db-amount db-align-right">80.00 EUR</td>
+              <td data-label="Status"><span class="db-status">Sent</span></td>
+            </tr>
+            <tr>
+              <td data-label="Date">10 Nov 2026</td>
+              <td data-label="Recipient">Liis P.</td>
+              <td data-label="Amount" class="db-amount db-align-right">1,200.00 EUR</td>
+              <td data-label="Status"><span class="db-status">Sent</span></td>
+            </tr>
+            <tr>
+              <td data-label="Date">8 Nov 2026</td>
+              <td data-label="Recipient">Oleg S.</td>
+              <td data-label="Amount" class="db-amount db-align-right">45.50 EUR</td>
+              <td data-label="Status"><span class="db-status">Sent</span></td>
+            </tr>
+            <tr>
+              <td data-label="Date">5 Nov 2026</td>
+              <td data-label="Recipient">Karl M.</td>
+              <td data-label="Amount" class="db-amount db-align-right">320.00 EUR</td>
+              <td data-label="Status"><span class="db-status">Sent</span></td>
+            </tr>
+            <tr>
+              <td data-label="Date">2 Nov 2026</td>
+              <td data-label="Recipient">Anna V.</td>
+              <td data-label="Amount" class="db-amount db-align-right">15.00 EUR</td>
+              <td data-label="Status"><span class="db-status">Sent</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
