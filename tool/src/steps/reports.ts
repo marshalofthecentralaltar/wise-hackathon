@@ -67,6 +67,8 @@ export class ReportStore {
   private running = false;
   private idleWaiters: (() => void)[] = [];
   private writing: Promise<void> = Promise.resolve();
+  /** True once this store has written its state file (or read one at start); see noticeOutsideReset. */
+  private fileIsOurs = false;
   private readonly classify: NonNullable<ReportStoreOptions['classify']>;
   private readonly log: (message: string) => void;
 
@@ -75,7 +77,10 @@ export class ReportStore {
     this.statePath = opts.statePath === undefined ? DEFAULT_STATE_PATH : opts.statePath;
     this.log = opts.log ?? ((m) => console.error(m));
     this.classify = opts.classify ?? ((reports, groups) => groupReports(reports, groups, { log: this.log }));
-    if (opts.load && this.statePath && existsSync(this.statePath)) this.loadSync(this.statePath);
+    if (opts.load && this.statePath && existsSync(this.statePath)) {
+      this.loadSync(this.statePath);
+      this.fileIsOurs = true;
+    }
   }
 
   /**
@@ -145,6 +150,7 @@ export class ReportStore {
       return;
     }
     this.running = true;
+    this.noticeOutsideReset();
     // Everything that arrived while the previous call ran goes into this one, in arrival order,
     // behind any report a failed call left ungrouped (each gets one more try). A trigger caused
     // by a retried report is returned to the first new caller in the batch.
@@ -224,6 +230,24 @@ export class ReportStore {
     });
   }
 
+  /**
+   * The reset command runs in its own process and deletes the state file. A store that wrote the
+   * file and finds it gone forgets every report and group before its next batch, so reports after
+   * a reset start new groups. Group ids keep counting, so the pipeline queue (which runs a group id
+   * once) runs the new group too.
+   */
+  private noticeOutsideReset(): void {
+    const path = this.statePath;
+    if (!path || !this.fileIsOurs || existsSync(path)) return;
+    this.fileIsOurs = false;
+    this.groupList = [];
+    this.triggered.clear();
+    this.ungroupedList = [];
+    this.chatterList = [];
+    this.retried.clear();
+    this.log(`[reports] ${path} is gone (a reset ran): forgetting every earlier report and group`);
+  }
+
   private persist(): Promise<void> {
     const path = this.statePath;
     if (!path) return Promise.resolve();
@@ -232,6 +256,7 @@ export class ReportStore {
       try {
         await mkdir(dirname(path), { recursive: true });
         await writeFile(path, text, 'utf8');
+        this.fileIsOurs = true;
       } catch (err) {
         this.log(`[reports] could not write ${path}: ${err instanceof Error ? err.message : String(err)}`);
       }
