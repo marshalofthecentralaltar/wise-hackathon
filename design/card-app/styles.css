@@ -218,9 +218,6 @@ body {
 
 .db-balance {
   margin: 0;
-}
-
-.db-balance-value {
   font-size: var(--db-font-balance);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -466,7 +463,7 @@ body {
     font-size: var(--db-font-title-mobile);
   }
 
-  .db-balance-value {
+  .db-balance {
     font-size: var(--db-font-balance-mobile);
   }
 
