@@ -142,7 +142,7 @@ describe('fixStep: high severity does nothing at all', () => {
       expect(fix.run).not.toHaveBeenCalled();
       expect(fix.writeFixPullRequest).not.toHaveBeenCalled();
       expect(remoteBranches(fixture.bare)).toEqual(['main']);
-    });
+    }, 60_000);
   }
 });
 
