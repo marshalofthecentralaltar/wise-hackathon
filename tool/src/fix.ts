@@ -225,6 +225,104 @@ export function resolveClaudeExecutable(): string {
   throw new Error('claude executable not found on PATH');
 }
 
+// ---------------------------------------------------------------------------------------------
+// Starting the model, with one retry when it fails to start.
+//
+// The CLI updates itself while it runs: claude.exe is swapped in the global npm folder, and a
+// call started at that moment fails at once (measured 13 Nov: exit -1 at 0 s, so the fix step
+// fell back to the undo branch with 38 s of budget unused). Every model call goes through
+// runModel: a start failure forgets the cached path, resolves it again, waits 1 s and tries once
+// more. A timeout, or a non-zero exit after real work, is not retried.
+
+/** How the model is launched: the executable and any arguments before the CLI's own. */
+export interface ModelLauncher {
+  cmd: string;
+  prefixArgs: string[];
+}
+
+const defaultLauncher = (): ModelLauncher => ({ cmd: resolveClaudeExecutable(), prefixArgs: [] });
+let launcherResolver: () => ModelLauncher = defaultLauncher;
+let cachedLauncher: ModelLauncher | undefined;
+
+/** The cached launcher, resolved on first use and again after a start failure. */
+export function modelLauncher(): ModelLauncher {
+  cachedLauncher ??= launcherResolver();
+  return cachedLauncher;
+}
+
+/** Drops the cached launcher, so the next call resolves the executable again. */
+export function forgetModelLauncher(): void {
+  cachedLauncher = undefined;
+}
+
+/** For tests: replace how the launcher is resolved (undefined restores the real one). Clears the cache. */
+export function setModelLauncherResolver(resolver?: () => ModelLauncher): void {
+  launcherResolver = resolver ?? defaultLauncher;
+  cachedLauncher = undefined;
+}
+
+export const START_FAILURE_WINDOW_MS = 2_000;
+
+/** A spawn error (exit -1), or an exit within 2 s with nothing on stdout. Never a timeout. */
+export function isStartFailure(r: RunResult, ms: number): boolean {
+  if (r.timedOut) return false;
+  if (r.code === -1) return true;
+  return ms < START_FAILURE_WINDOW_MS && r.stdout.trim() === '';
+}
+
+export interface ModelRunResult extends RunResult {
+  /** 1, or 2 when the first start failed. */
+  attempts: number;
+  /** Why the first attempt was retried, when it was. */
+  retriedBecause?: string;
+}
+
+/**
+ * Runs the model CLI with args. `command` fixes the executable (no resolving); otherwise the
+ * cached launcher is used and resolved again after a start failure.
+ */
+export async function runModel(
+  args: string[],
+  opts: {
+    cwd: string;
+    timeoutMs: number;
+    input?: string;
+    signal?: AbortSignal;
+    onSpawn?: (pid: number) => void;
+    command?: string;
+    retryDelayMs?: number;
+  },
+): Promise<ModelRunResult> {
+  const attempt = async (): Promise<{ r: RunResult; ms: number }> => {
+    const t0 = performance.now();
+    let launcher: ModelLauncher;
+    try {
+      launcher = opts.command ? { cmd: opts.command, prefixArgs: [] } : modelLauncher();
+    } catch (err) {
+      return { r: { code: -1, stdout: '', stderr: String(err), timedOut: false }, ms: 0 };
+    }
+    const r = await run(launcher.cmd, [...launcher.prefixArgs, ...args], {
+      cwd: opts.cwd,
+      timeoutMs: opts.timeoutMs,
+      input: opts.input,
+      signal: opts.signal,
+      onSpawn: opts.onSpawn,
+    });
+    return { r, ms: performance.now() - t0 };
+  };
+  const first = await attempt();
+  if (!isStartFailure(first.r, first.ms) || opts.signal?.aborted) return { ...first.r, attempts: 1 };
+  const retriedBecause = `exit ${first.r.code} after ${Math.round(first.ms)} ms: ${(first.r.stderr || first.r.stdout).trim().slice(0, 200)}`;
+  forgetModelLauncher();
+  await new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, opts.retryDelayMs ?? 1_000);
+    opts.signal?.addEventListener('abort', () => (clearTimeout(t), resolve()), { once: true });
+  });
+  if (opts.signal?.aborted) return { ...first.r, attempts: 1, retriedBecause };
+  const second = await attempt();
+  return { ...second.r, attempts: 2, retriedBecause };
+}
+
 /** Tools Claude may use in the clone. Everything else is denied without a prompt (dontAsk). */
 export const CLAUDE_ALLOWED_TOOLS = [
   'Read',
@@ -332,7 +430,8 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
 
   // 2. Claude Code writes the fix.
   t0 = performance.now();
-  const claude = await run(input.claudeCommand ?? resolveClaudeExecutable(), input.claudeArgs ?? claudeArgs(model), {
+  const claude = await runModel(input.claudeArgs ?? claudeArgs(model), {
+    command: input.claudeCommand,
     cwd,
     timeoutMs: CLAUDE_TIMEOUT_MS,
     input: input.prompt ?? buildFixPrompt(reportText),

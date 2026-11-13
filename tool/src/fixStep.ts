@@ -11,7 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import { config } from './config.js';
 import { ensureDeps, unlinkDeps } from './deps.js';
-import { ghCreatePullRequest, resolveClaudeExecutable, run, toolGitIdentity, writeFixPullRequest, type FixResult, type PullRequestRequest, type PullRequestResult } from './fix.js';
+import { ghCreatePullRequest, run, toolGitIdentity, writeFixPullRequest, type FixResult, type PullRequestRequest, type PullRequestResult } from './fix.js';
 import type { FixOutcome, FixStepInput } from './types.js';
 import { freshCopy } from './workspace.js';
 
@@ -169,7 +169,8 @@ export async function fixStepWithDetails(input: FixStepInput, opts: FixStepOptio
       baseBranch: copy.branch,
       prepare: opts.installDeps ?? ((dir) => ensureDeps(dir)),
       prompt: buildFixStepPrompt(input),
-      claudeCommand: opts.modelCommand?.cmd ?? resolveClaudeExecutable(),
+      // Undefined: the shared launcher, resolved again and retried once inside the same budget when the model fails to start.
+      claudeCommand: opts.modelCommand?.cmd,
       claudeArgs: opts.modelCommand?.args ?? fixModelArgs(model, opts.confineToCopy ?? true),
       allowFile: (f) => isUnder(f, owner.codePath),
       signal: budget.signal,

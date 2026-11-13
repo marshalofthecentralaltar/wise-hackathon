@@ -2,7 +2,7 @@
 // no user customisations, tools limited, answer as structured JSON. Used by the investigation
 // (step 6) and the text-only customer-effect check (step 7).
 
-import { parseClaudeJson, resolveClaudeExecutable, run, type ClaudeRunInfo } from './fix.js';
+import { parseClaudeJson, runModel, type ClaudeRunInfo } from './fix.js';
 
 export interface ClaudeQuestion {
   prompt: string;
@@ -40,11 +40,6 @@ export interface ClaudeAnswer {
   raw: string;
 }
 
-let claudeExe: string | undefined;
-function claudeExecutable(): string {
-  claudeExe ??= resolveClaudeExecutable();
-  return claudeExe;
-}
 
 export function questionArgs(q: Omit<ClaudeQuestion, 'prompt' | 'cwd' | 'timeoutMs'>): string[] {
   const args = [
@@ -95,7 +90,8 @@ export function extractStructured(stdout: string): unknown {
 
 export async function askClaude(q: ClaudeQuestion): Promise<ClaudeAnswer> {
   const t0 = performance.now();
-  const r = await run(claudeExecutable(), questionArgs(q), { cwd: q.cwd, timeoutMs: q.timeoutMs, input: q.prompt });
+  // runModel: the cached executable, resolved again and retried once when the model fails to start.
+  const r = await runModel(questionArgs(q), { cwd: q.cwd, timeoutMs: q.timeoutMs, input: q.prompt });
   const info = parseClaudeJson(r.stdout);
   info.exitCode = r.code;
   const raw = r.stdout + '\n' + r.stderr;
