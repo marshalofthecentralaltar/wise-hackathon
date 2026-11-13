@@ -1,0 +1,24 @@
+{
+  "name": "wise-hackathon-tool",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "thin": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env src/thin.ts",
+    "time-fix": "tsx --env-file-if-exists=C:/Users/ralfs/wise-build/secrets.env scripts/time-fix.ts"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@slack/web-api": "^8.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
