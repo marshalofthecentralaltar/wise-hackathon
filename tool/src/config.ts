@@ -16,7 +16,7 @@ export const config = {
   appBaseUrl: env('APP_BASE_URL', 'http://localhost:3000'),
   prometheusUrl: env('PROMETHEUS_URL', 'http://localhost:9090'),
   /** The card app's request log, one JSON object per line. */
-  requestLogFile: env('REQUEST_LOG_FILE', 'C:/Users/ralfs/wise-build/demo-bank-card-app/logs/requests.log'),
+  requestLogFile: env('REQUEST_LOG_FILE', 'C:/Users/ralfs/wise-build/demo-bank-card-app-deploy/logs/requests.log'),
   /** How far back step 4 lists commits. */
   recentDays: Number(env('RECENT_DAYS', '7')),
   /** Seconds step 8 waits for a tested fix before it pushes a branch that undoes the commit. */

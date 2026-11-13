@@ -33,6 +33,17 @@ export function p95Query(path: string | null): string {
   return `histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket${selector}[1h])))`;
 }
 
+/**
+ * Whether Prometheus read the app at its last try. The job name is the one in monitoring/prometheus.template.yml.
+ * Without this, an app that is down gives empty answers to the three queries above, and empty reads as "no errors".
+ */
+export function upQuery(): string {
+  return 'max(up{job="card-app"})';
+}
+
+/** Prometheus answered, but it holds no fresh reading of the app: its "no errors" would mean nothing. */
+class NoReadingError extends Error {}
+
 async function getJson(url: string, signal: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`${url} answered ${res.status}`);
@@ -151,12 +162,14 @@ export async function checkMonitoring(page: Page | null, opts: MonitoringOptions
   try {
     const signal = AbortSignal.timeout(opts.prometheusTimeoutMs ?? 3_000);
     const q = (query: string) => getJson(`${prometheusUrl}/api/v1/query?query=${encodeURIComponent(query)}`, signal);
-    const [rate, increase, p95, alerts] = await Promise.all([
+    const [rate, increase, p95, alerts, up] = await Promise.all([
       q(errorRateQuery(path)),
       q(errorCountQuery(path)),
       q(p95Query(path)),
       getJson(`${prometheusUrl}/api/v1/alerts`, signal),
+      q(upQuery()),
     ]);
+    if (scalarOf(up) !== 1) throw new NoReadingError();
     errorsPerSecond = scalarOf(rate) ?? 0;
     errorCount5xx = Math.round(scalarOf(increase) ?? 0);
     p95Seconds = scalarOf(p95);
@@ -172,7 +185,9 @@ export async function checkMonitoring(page: Page | null, opts: MonitoringOptions
     monitoringSentence = `Prometheus shows ${parts.join(', ')}.`;
   } catch (promErr) {
     source = 'metrics-endpoint';
-    const why = promErr instanceof Error && promErr.name === 'TimeoutError' ? 'did not answer within 3 seconds' : 'did not answer';
+    const why = promErr instanceof NoReadingError
+      ? 'has no fresh reading of the app'
+      : promErr instanceof Error && promErr.name === 'TimeoutError' ? 'did not answer within 3 seconds' : 'did not answer';
     try {
       const signal = AbortSignal.timeout(opts.metricsTimeoutMs ?? 3_000);
       const res = await fetch(`${appBaseUrl}/metrics`, { signal });

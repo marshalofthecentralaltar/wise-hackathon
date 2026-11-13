@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMonitoring, errorRateQuery } from '../src/steps/monitoring.js';
+import { checkMonitoring, errorRateQuery, upQuery } from '../src/steps/monitoring.js';
 
 const NOW = new Date('2026-11-14T10:00:00.000Z');
 const APP_PORT = 3300;
@@ -60,10 +60,12 @@ interface PromStub {
   rate: string;
   count: string;
   p95: string;
+  /** The answer to the `up` query: '1' read, '0' could not read the app, '' no series at all. */
+  up: string;
   alerts: { labels: Record<string, string>; state: string }[];
   queries: string[];
 }
-const prom: PromStub = { rate: '0', count: '0', p95: 'NaN', alerts: [], queries: [] };
+const prom: PromStub = { rate: '0', count: '0', p95: 'NaN', up: '1', alerts: [], queries: [] };
 let promServer: Server;
 let promUrl = '';
 let hangingServer: Server;
@@ -93,7 +95,7 @@ beforeAll(async () => {
     if (url.pathname === '/api/v1/query') {
       const q = url.searchParams.get('query') ?? '';
       prom.queries.push(q);
-      const value = q.startsWith('histogram_quantile') ? prom.p95 : q.startsWith('sum(increase(') ? prom.count : prom.rate;
+      const value = q === upQuery() ? prom.up : q.startsWith('histogram_quantile') ? prom.p95 : q.startsWith('sum(increase(') ? prom.count : prom.rate;
       res.end(JSON.stringify({ status: 'success', data: { resultType: 'vector', result: value === '' ? [] : [{ metric: {}, value: [NOW.getTime() / 1000, value] }] } }));
       return;
     }
@@ -193,6 +195,29 @@ describe('checkMonitoring through Prometheus', () => {
     expect(f).toMatchObject({ source: 'prometheus', errorsPerSecond: 0.05, errorCount5xx: 180, alertsFiring: ['CardErrors'], p95Seconds: 0.2, showsProblem: true, logErrors: 2 });
     expect(f.summary).toContain('about 180 responses with status 5xx on /card in the last hour (0.05 per second)');
     expect(f.summary).toContain('firing alerts: CardErrors');
+  });
+
+  it('Prometheus answers but could not read the app: its empty answers are not "no errors"; the app is asked directly', async () => {
+    appMetrics = metricsText(0);
+    for (const up of ['0', '']) {
+      Object.assign(prom, { rate: '', count: '', p95: '', up, alerts: [], queries: [] });
+      const f = await checkMonitoring('card', { prometheusUrl: promUrl, appBaseUrl, logFile: healthyLog, now: NOW });
+      expect(prom.queries).toContain('max(up{job="card-app"})');
+      expect(f).toMatchObject({ source: 'metrics-endpoint', showsProblem: false, errorCount5xx: 0 });
+      expect(f.unavailable ?? false).toBe(false);
+      expect(f.summary).toContain("Prometheus has no fresh reading of the app; the app's own /metrics counts no responses with status 5xx on /card");
+      expect(f.summary).not.toContain('Prometheus shows');
+    }
+    prom.up = '1';
+  });
+
+  it('Prometheus answers, could not read the app, and the app is down: unavailable, never "Nothing found"', async () => {
+    Object.assign(prom, { rate: '', count: '', p95: '', up: '0', alerts: [], queries: [] });
+    const f = await checkMonitoring('card', { prometheusUrl: promUrl, appBaseUrl: closedUrl, logFile: healthyLog, now: NOW });
+    prom.up = '1';
+    expect(f).toMatchObject({ source: 'metrics-endpoint', unavailable: true, showsProblem: false });
+    expect(f.summary).toContain("Monitoring could not be read. Prometheus has no fresh reading of the app and the app's /metrics could not be read");
+    expect(f.summary).not.toContain('Nothing found');
   });
 
   it('an alert alone makes showsProblem true', async () => {
