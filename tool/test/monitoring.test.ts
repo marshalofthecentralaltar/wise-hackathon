@@ -58,11 +58,12 @@ let app: Server;
 
 interface PromStub {
   rate: string;
+  count: string;
   p95: string;
   alerts: { labels: Record<string, string>; state: string }[];
   queries: string[];
 }
-const prom: PromStub = { rate: '0', p95: 'NaN', alerts: [], queries: [] };
+const prom: PromStub = { rate: '0', count: '0', p95: 'NaN', alerts: [], queries: [] };
 let promServer: Server;
 let promUrl = '';
 let hangingServer: Server;
@@ -92,7 +93,7 @@ beforeAll(async () => {
     if (url.pathname === '/api/v1/query') {
       const q = url.searchParams.get('query') ?? '';
       prom.queries.push(q);
-      const value = q.startsWith('histogram_quantile') ? prom.p95 : prom.rate;
+      const value = q.startsWith('histogram_quantile') ? prom.p95 : q.startsWith('sum(increase(') ? prom.count : prom.rate;
       res.end(JSON.stringify({ status: 'success', data: { resultType: 'vector', result: value === '' ? [] : [{ metric: {}, value: [NOW.getTime() / 1000, value] }] } }));
       return;
     }
@@ -122,6 +123,16 @@ describe('checkMonitoring through the app /metrics (Prometheus down)', () => {
     expect(f).toMatchObject({ source: 'metrics-endpoint', errorsPerSecond: 0, alertsFiring: [], p95Seconds: null, logLinesRead: 2, logErrors: 0, logWarnings: 0, showsProblem: false });
     expect(f.summary).toMatch(/^Nothing found\./);
     expect(f.summary).toContain('no responses with status 5xx on /card');
+    expect(f.unavailable ?? false).toBe(false);
+    expect(f.errorCount5xx).toBe(0);
+  });
+
+  it('neither Prometheus nor the app answers: unavailable, never "Nothing found"', async () => {
+    const f = await checkMonitoring('card', { prometheusUrl: closedUrl, appBaseUrl: closedUrl, logFile: healthyLog, now: NOW });
+    expect(f).toMatchObject({ source: 'metrics-endpoint', unavailable: true, errorsPerSecond: 0, showsProblem: false });
+    expect(f.errorCount5xx).toBeUndefined();
+    expect(f.summary).toMatch(/^Monitoring could not be read\./);
+    expect(f.summary).not.toContain('Nothing found');
   });
 
   it('failing: the 5xx count is named and the log errors counted', async () => {
@@ -129,7 +140,8 @@ describe('checkMonitoring through the app /metrics (Prometheus down)', () => {
     const f = await checkMonitoring('card', { prometheusUrl: closedUrl, appBaseUrl, logFile: failingLog, now: NOW });
     expect(f.source).toBe('metrics-endpoint');
     expect(f.showsProblem).toBe(true);
-    expect(f.errorsPerSecond).toBeGreaterThan(0);
+    expect(f).toMatchObject({ errorCount5xx: 7, errorsPerSecond: 0 }); // a count since start, never a made-up rate
+    expect(f.unavailable ?? false).toBe(false);
     expect(f.summary).toContain('7 responses with status 5xx on /card');
     expect(f).toMatchObject({ logLinesRead: 4, logErrors: 2, logWarnings: 1 });
     expect(f.summary).not.toMatch(/^Nothing found/);
@@ -156,7 +168,7 @@ describe('checkMonitoring through the app /metrics (Prometheus down)', () => {
 
 describe('checkMonitoring through Prometheus', () => {
   it('healthy: sends the contract query and finds nothing', async () => {
-    Object.assign(prom, { rate: '0', p95: '0.0123', alerts: [{ labels: { alertname: 'TransfersErrors', path: '/transfers' }, state: 'firing' }], queries: [] });
+    Object.assign(prom, { rate: '0', count: '0', p95: '0.0123', alerts: [{ labels: { alertname: 'TransfersErrors', path: '/transfers' }, state: 'firing' }], queries: [] });
     const f = await checkMonitoring('card', { prometheusUrl: promUrl, appBaseUrl, logFile: healthyLog, now: NOW });
     expect(prom.queries).toContain('sum(rate(http_requests_total{path="/card",status=~"5.."}[1h]))');
     expect(errorRateQuery('/card')).toBe('sum(rate(http_requests_total{path="/card",status=~"5.."}[1h]))');
@@ -167,7 +179,9 @@ describe('checkMonitoring through Prometheus', () => {
   it('failing: an error rate and a firing alert for the page', async () => {
     Object.assign(prom, {
       rate: '0.05',
+      count: '180.4',
       p95: '0.2',
+      queries: [],
       alerts: [
         { labels: { alertname: 'CardErrors', path: '/card' }, state: 'firing' },
         { labels: { alertname: 'CardSlow', path: '/card' }, state: 'pending' },
@@ -175,13 +189,14 @@ describe('checkMonitoring through Prometheus', () => {
       ],
     });
     const f = await checkMonitoring('card', { prometheusUrl: promUrl, appBaseUrl, logFile: failingLog, now: NOW });
-    expect(f).toMatchObject({ source: 'prometheus', errorsPerSecond: 0.05, alertsFiring: ['CardErrors'], p95Seconds: 0.2, showsProblem: true, logErrors: 2 });
-    expect(f.summary).toContain('0.05 responses per second with status 5xx on /card');
+    expect(prom.queries).toContain('sum(increase(http_requests_total{path="/card",status=~"5.."}[1h]))');
+    expect(f).toMatchObject({ source: 'prometheus', errorsPerSecond: 0.05, errorCount5xx: 180, alertsFiring: ['CardErrors'], p95Seconds: 0.2, showsProblem: true, logErrors: 2 });
+    expect(f.summary).toContain('about 180 responses with status 5xx on /card in the last hour (0.05 per second)');
     expect(f.summary).toContain('firing alerts: CardErrors');
   });
 
   it('an alert alone makes showsProblem true', async () => {
-    Object.assign(prom, { rate: '', p95: '', alerts: [{ labels: { alertname: 'CardAppDown' }, state: 'firing' }] });
+    Object.assign(prom, { rate: '', count: '', p95: '', alerts: [{ labels: { alertname: 'CardAppDown' }, state: 'firing' }] });
     const f = await checkMonitoring('card', { prometheusUrl: promUrl, appBaseUrl, logFile: healthyLog, now: NOW });
     expect(f).toMatchObject({ errorsPerSecond: 0, p95Seconds: null, alertsFiring: ['CardAppDown'], showsProblem: true });
   });

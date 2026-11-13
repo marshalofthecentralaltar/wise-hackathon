@@ -41,6 +41,10 @@ export interface MonitoringFinding {
   logWarnings: number;
   /** True when errors, a firing alert or error log lines were found. */
   showsProblem: boolean;
+  /** True when neither Prometheus nor the app's own /metrics could be read. The page's health is then unknown. */
+  unavailable?: boolean;
+  /** Count of 5xx responses behind the finding: over the last hour from Prometheus, since the app started from the fallback. */
+  errorCount5xx?: number;
   /** One or two plain sentences for part 3 of the handoff. */
   summary: string;
 }

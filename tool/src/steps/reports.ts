@@ -34,6 +34,8 @@ export interface ReportStoreOptions {
 interface Pending {
   report: Report;
   request: number;
+  /** A report a failed call left ungrouped, on its one more try. */
+  retry?: boolean;
 }
 
 interface Waiter {
@@ -56,6 +58,8 @@ export class ReportStore {
   private ungroupedList: Report[] = [];
   private chatterList: Report[] = [];
   private seen = new Set<string>();
+  /** Keys of ungrouped reports already given their one more try. */
+  private retried = new Set<string>();
   private pending: Pending[] = [];
   private waiters = new Map<number, Waiter>();
   private requestSeq = 0;
@@ -123,6 +127,7 @@ export class ReportStore {
     this.ungroupedList = [];
     this.chatterList = [];
     this.seen.clear();
+    this.retried.clear();
     this.groupSeq = 0;
     this.calls = 0;
     await this.persist();
@@ -140,8 +145,14 @@ export class ReportStore {
       return;
     }
     this.running = true;
-    // Everything that arrived while the previous call ran goes into this one, in arrival order.
-    const batch = this.pending.splice(0);
+    // Everything that arrived while the previous call ran goes into this one, in arrival order,
+    // behind any report a failed call left ungrouped (each gets one more try). A trigger caused
+    // by a retried report is returned to the first new caller in the batch.
+    const fresh = this.pending.splice(0);
+    const retries = this.ungroupedList.filter((r) => !this.retried.has(reportKey(r)));
+    for (const r of retries) this.retried.add(reportKey(r));
+    this.ungroupedList = this.ungroupedList.filter((r) => !retries.includes(r));
+    const batch: Pending[] = [...retries.map((report) => ({ report, request: fresh[0]!.request, retry: true })), ...fresh];
     void this.processBatch(batch)
       .catch((err) => this.log(`[reports] batch failed: ${err instanceof Error ? err.message : String(err)}`))
       .finally(() => {
@@ -164,12 +175,15 @@ export class ReportStore {
     try {
       if (!result.ok || result.decisions.length !== batch.length) {
         this.ungroupedList.push(...reports);
+        const final = batch.filter((p) => p.retry).map((p) => p.report.ts);
+        if (final.length) this.log(`[reports] retried once and still not classified; they stay ungrouped: ${final.join(', ')}`);
       } else {
         this.apply(batch, result);
       }
       await this.persist();
     } finally {
       for (const p of batch) {
+        if (p.retry) continue; // its own caller was answered when it first failed
         const w = this.waiters.get(p.request);
         if (!w) continue;
         w.remaining--;

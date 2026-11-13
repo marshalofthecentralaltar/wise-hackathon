@@ -125,3 +125,50 @@ function checkBurst(store: ReportStore, model: ReturnType<typeof fakeModel>, [r1
     expect([r1!.length, r2!.length, r3!.length]).toEqual([0, 0, 1]);
   }
 }
+
+/** A store whose model gives garbage for the first `failCalls` calls, then answers like fakeModel. */
+function flakyStore(failCalls: number) {
+  const model = fakeModel();
+  let n = 0;
+  const logs: string[] = [];
+  const store = new ReportStore({
+    threshold: 3,
+    statePath: null,
+    log: (m) => logs.push(m),
+    classify: (rs, gs) =>
+      groupReports(rs, gs, { callModel: (p, s) => (++n <= failCalls ? Promise.resolve({ ok: true, text: 'garbage' }) : model.call(p, s)), log: (m) => logs.push(m) }),
+  });
+  return { store, model, logs };
+}
+
+describe('report store: retry of ungrouped reports', () => {
+  it('a report whose batch failed goes in front of the next batch and can complete the threshold', async () => {
+    const { store, model } = flakyStore(2); // the first batch fails both attempts
+    const first = report('flicker one');
+    expect(await store.addReports([first])).toEqual([]);
+    expect(store.state().ungrouped.map((r) => r.ts)).toEqual([first.ts]);
+    expect(await store.addReports([report('flicker two')])).toEqual([]);
+    expect(model.batches[0]).toEqual(['flicker one', 'flicker two']); // retried report first
+    expect(store.state().ungrouped).toEqual([]);
+    const third = await store.addReports([report('flicker three')]);
+    expect(third).toHaveLength(1);
+    expect(third[0]!.reports.map((r) => r.text)).toEqual(['flicker one', 'flicker two', 'flicker three']);
+  });
+
+  it('a report that fails on its retry is not tried a third time, and one log line names it', async () => {
+    const { store, model, logs } = flakyStore(4); // the first two batches fail
+    const first = report('flicker one');
+    const second = report('flicker two');
+    await store.addReports([first]);
+    await store.addReports([second]); // [one (retry), two] fails
+    const final = logs.filter((l) => l.includes('retried once'));
+    expect(final).toHaveLength(1);
+    expect(final[0]).toContain(first.ts);
+    expect(final[0]).not.toContain(second.ts);
+    await store.addReports([report('flicker three')]);
+    expect(model.batches).toEqual([['flicker two', 'flicker three']]); // one is not sent again
+    expect(store.state().ungrouped.map((r) => r.ts)).toEqual([first.ts]);
+    await store.addReports([report('flicker four')]);
+    expect(model.batches[1]).toEqual(['flicker four']);
+  });
+});

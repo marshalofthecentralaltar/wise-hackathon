@@ -57,7 +57,7 @@ export function buildGroupingPrompt(newReports: Report[], openGroups: ReportGrou
     'Support agents at Demo Bank post in #support what customers told them. They also chat with each other there.',
     'The app has three pages:',
     '- card: the payment card page. It shows the card picture, the balance and the recent card payments.',
-    '- transfers: the list of money transfers and their amounts.',
+    '- transfers: the list of money transfers sent and received.',
     '- account: the account holder\'s details, such as name and address.',
     '',
     'Open groups. Each group is one problem customers have already reported:',
@@ -68,12 +68,12 @@ export function buildGroupingPrompt(newReports: Report[], openGroups: ReportGrou
     '',
     'For every new message decide four things:',
     '1. is_report: true when the message passes on a problem a customer has with the app. false for chatter between agents: greetings, shift notes, lunch, thanks, questions about procedures, anything that is not a customer\'s problem with the app.',
-    '2. page: "card", "transfers" or "account" when the problem is on that page; null when the message does not say or the problem is somewhere else (login, statements, settings, language and so on).',
-    '3. group: the id of the open group (g1, g2, ...) when the message is about the SAME problem as that group. Otherwise a new label n1, n2, ... for a new problem; new messages about the same new problem share one label. Being on the same page is not enough: the same problem means the same symptom. For example, a flickering or blinking card picture and a declined card payment are two different problems on the card page, and a wrong amount in the transfers list is a different problem from a failed transfer. Use null when is_report is false.',
+    '2. page: "card", "transfers" or "account" when the problem is on that page; null when the message does not say or the problem is somewhere else in the app.',
+    '3. group: the id of the open group (g1, g2, ...) when the message is about the SAME problem as that group. Otherwise a new label n1, n2, ... for a new problem; new messages about the same new problem share one label. Being on the same page is not enough: the same problem means the same symptom. For example, a push notification that arrives twice and a push notification that never arrives are two different problems, and a savings goal that cannot be deleted is a different problem from a savings goal that shows the wrong target date. Use null when is_report is false.',
     '4. summary: one short English sentence that states the problem as customers describe it. Use "" when is_report is false.',
     '',
     'Answer with exactly this JSON shape, one entry per new message, in the same order:',
-    '{"messages":[{"id":"m1","is_report":true,"page":"card","group":"n1","summary":"The card picture blinks on the card page."}]}',
+    '{"messages":[{"id":"m1","is_report":true,"page":null,"group":"n1","summary":"Push notifications about incoming money arrive twice."}]}',
   ].join('\n');
 }
 
