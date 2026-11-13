@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Report } from '../src/types.js';
+import type { Report, ReportGroup } from '../src/types.js';
 import { groupReports } from '../src/steps/grouping.js';
 import { ReportStore } from '../src/steps/reports.js';
 import { fakeModel } from './helpers/fakeModel.js';
@@ -92,21 +92,36 @@ describe('report store: threshold', () => {
 
 describe('report store: burst', () => {
   it('three reports added within 50 ms cause at most two model calls and end in one group of three', async () => {
-    const { store, model } = storeWith(200);
-    const t0 = performance.now();
-    const p1 = store.addReports([report('flicker first')]);
-    await new Promise((r) => setTimeout(r, 10));
-    const p2 = store.addReports([report('flicker second')]);
-    await new Promise((r) => setTimeout(r, 10));
-    const p3 = store.addReports([report('flicker third')]);
-    expect(performance.now() - t0).toBeLessThan(50);
-    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+    // Fake timers: the 200 ms model and the 20 ms gaps run on a clock the test controls, so a
+    // busy machine cannot stretch the burst past 50 ms.
+    vi.useFakeTimers();
+    try {
+      const { store, model } = storeWith(200);
+      const t0 = Date.now();
+      const p1 = store.addReports([report('flicker first')]);
+      await vi.advanceTimersByTimeAsync(20);
+      const p2 = store.addReports([report('flicker second')]);
+      await vi.advanceTimersByTimeAsync(20);
+      const p3 = store.addReports([report('flicker third')]);
+      expect(Date.now() - t0).toBe(40);
+      expect(model.calls()).toBe(1); // the first call is still running
+      await vi.advanceTimersByTimeAsync(1_000);
+      const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+      checkBurst(store, model, [r1, r2, r3]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+function checkBurst(store: ReportStore, model: ReturnType<typeof fakeModel>, [r1, r2, r3]: ReportGroup[][]) {
+  {
     expect(model.calls()).toBeLessThanOrEqual(2);
     expect(model.batches).toEqual([['flicker first'], ['flicker second', 'flicker third']]); // arrival order
     const groups = store.groups();
     expect(groups).toHaveLength(1);
     expect(groups[0]!.reports.map((r) => r.text)).toEqual(['flicker first', 'flicker second', 'flicker third']);
     // Triggered exactly once, to the caller whose report made it three.
-    expect([r1.length, r2.length, r3.length]).toEqual([0, 0, 1]);
-  });
-});
+    expect([r1!.length, r2!.length, r3!.length]).toEqual([0, 0, 1]);
+  }
+}
