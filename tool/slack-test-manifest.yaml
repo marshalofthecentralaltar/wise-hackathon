@@ -1,0 +1,23 @@
+# Slack app manifest for the second app, used only by the full-run test script.
+# It posts the customer reports into #support, as a support integration would.
+# The triage tool must treat its messages exactly like a person's.
+# Paste this into api.slack.com/apps -> Create New App -> From a manifest (YAML tab),
+# pick the workspace "Innovative Bug Fixer", create, then Install to Workspace.
+# The token to copy is "Bot User OAuth Token" (starts with xoxb-) under OAuth & Permissions.
+display_information:
+  name: Support Desk
+  description: Passes on what customers told support. Used by the test script for full runs.
+features:
+  bot_user:
+    display_name: Support Desk
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - chat:write.public
+      - channels:read
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
