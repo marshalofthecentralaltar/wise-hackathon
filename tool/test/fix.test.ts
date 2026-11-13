@@ -45,7 +45,10 @@ describe('run on timeout', () => {
     // Parent prints its own pid and its child's pid, then both sleep for 60 s.
     const parentScript = [
       "const { spawn } = require('node:child_process');",
-      "const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });",
+      // On Windows, libuv puts a Node child in a kill-on-close job, so a non-detached grandchild
+    // would die with its parent anyway and hide the defect. claude.exe and cmd.exe do not do
+    // that; detached reproduces their grandchildren. (POSIX: same group, so not detached.)
+    `const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', detached: ${process.platform === 'win32'} });`,
       "console.log(process.pid + ' ' + c.pid);",
       'setTimeout(() => {}, 60000);',
     ].join('\n');
@@ -58,7 +61,10 @@ describe('run on timeout', () => {
     expect(parentPid).toBeGreaterThan(0);
     expect(childPid).toBeGreaterThan(0);
     await new Promise((res) => setTimeout(res, 300));
-    expect(alive(parentPid as number)).toBe(false);
-    expect(alive(childPid as number)).toBe(false);
+    const parentAlive = alive(parentPid as number);
+    const childAlive = alive(childPid as number);
+    for (const pid of [parentPid, childPid]) if (pid && alive(pid)) process.kill(pid); // never leave one behind
+    expect(parentAlive).toBe(false);
+    expect(childAlive).toBe(false);
   }, 10_000);
 });
