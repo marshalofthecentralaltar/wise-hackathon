@@ -1,0 +1,266 @@
+// Steps 3 to 10 for one group that reached the threshold, in the order of docs/CONTEXT.md:
+// fill the report links; monitoring, recent changes and owner at the same time; the
+// investigation with the text-only effect classification started beside it; the verdict; the
+// fix (called for every verdict: the fix step itself does nothing for high severity); the
+// handoff; the post. Short progress lines go into the thread as steps finish. They never name
+// the owner: the handoff is the only message that does.
+//
+// runPipeline never rejects. A step that throws ends in a plain line in the thread and a logged
+// error, and the listener carries on.
+import { appendFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config } from './config.js';
+import { buildHandoffMessage, customerSentence as defaultCustomerSentence, fallbackCustomerSentence } from './handoff.js';
+import type { SlackPort } from './slackPost.js';
+import { listRecentChanges as defaultListRecentChanges } from './steps/changes.js';
+import { checkMonitoring as defaultCheckMonitoring } from './steps/monitoring.js';
+import { findOwner as defaultFindOwner, readOwnersMap } from './steps/owner.js';
+import type {
+  CodeSteps,
+  FixOutcome,
+  Handoff,
+  Investigation,
+  MonitoringFinding,
+  Owner,
+  Page,
+  RecentCommit,
+  ReportGroup,
+  RunTimings,
+  Verdict,
+} from './types.js';
+
+export const DEFAULT_TIMINGS_PATH = fileURLToPath(new URL('../.state/timings.jsonl', import.meta.url));
+
+export interface PipelineDeps {
+  /** Steps 6 to 8: investigate, classifyCustomerEffect, judge, fix. */
+  code: CodeSteps;
+  slack: SlackPort;
+  /** Steps 3 to 5; the real ones when absent. */
+  checkMonitoring?: (page: Page | null) => Promise<MonitoringFinding>;
+  listRecentChanges?: () => Promise<RecentCommit[]>;
+  findOwner?: (page: Page | null) => Promise<Owner>;
+  /** Part 8 of the handoff. Gets the strings it must not contain. The real model call when absent. */
+  customerSentence?: (group: ReportGroup, forbidden: string[]) => Promise<string>;
+  /** Seconds step 2 took for the message that completed the group, measured by the caller. */
+  patternSeconds?: number;
+  /** null writes no file. */
+  timingsPath?: string | null;
+  log?: (line: string) => void;
+}
+
+export type PipelineStep = 'permalinks' | 'monitoring' | 'changes' | 'owner' | 'investigation' | 'verdict' | 'fix' | 'handoff' | 'post';
+
+export interface PipelineResult {
+  ok: boolean;
+  /** The step that threw, when ok is false. */
+  failedStep?: PipelineStep;
+  error?: string;
+  handoff?: Handoff;
+  /** ts of the handoff message in the thread. */
+  handoffTs?: string;
+  timings: RunTimings;
+}
+
+class StepError extends Error {
+  constructor(
+    readonly step: PipelineStep,
+    readonly cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+const round = (s: number) => Math.round(s * 10) / 10;
+const since = (t0: number) => round((performance.now() - t0) / 1000);
+
+/** Runs fn, records its seconds under `step`, and tags a throw with the step's name. */
+async function timed<T>(step: PipelineStep, secs: Record<string, number>, fn: () => Promise<T>): Promise<T> {
+  const t0 = performance.now();
+  try {
+    return await fn();
+  } catch (err) {
+    throw new StepError(step, err);
+  } finally {
+    if (step !== 'permalinks') secs[step] = since(t0);
+  }
+}
+
+const STEP_WORDS: Record<PipelineStep, string> = {
+  permalinks: 'reading the report links',
+  monitoring: 'checking monitoring and logs',
+  changes: 'listing recent changes',
+  owner: 'reading the owners file',
+  investigation: 'investigating the code',
+  verdict: 'judging severity',
+  fix: 'writing the fix',
+  handoff: 'writing the handoff',
+  post: 'posting the handoff',
+};
+
+/** Strings that identify the owner: the GitHub login, the person's name from owners.json, the Slack id. */
+export function ownerStrings(owner: Pick<Owner, 'githubLogin' | 'slackUserId'>): string[] {
+  const out: string[] = [];
+  if (owner.githubLogin) {
+    out.push(owner.githubLogin);
+    const name = readOwnersMap()[owner.githubLogin];
+    if (name) out.push(name);
+  }
+  if (owner.slackUserId) out.push(owner.slackUserId);
+  return out;
+}
+
+const scrub = (text: string, secrets: string[]) => secrets.reduce((t, s) => (s ? t.split(s).join('the owner') : t), text);
+
+export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promise<PipelineResult> {
+  const log = deps.log ?? ((m: string) => console.error(m));
+  const startedAt = new Date().toISOString();
+  const t0 = performance.now();
+  const secs: Record<string, number> = {};
+  if (deps.patternSeconds !== undefined) secs.pattern = round(deps.patternSeconds);
+  const channel = group.reports[0]?.channel ?? '';
+  const threadTs = group.threadTs;
+  let ownerSecrets: string[] = [];
+
+  const say = async (text: string): Promise<void> => {
+    try {
+      await deps.slack.postMessage({ channel, threadTs, text });
+    } catch (err) {
+      log(`[pipeline ${group.id}] could not post "${text.slice(0, 60)}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  let result: PipelineResult;
+  try {
+    result = await steps();
+  } catch (err) {
+    const step = err instanceof StepError ? err.step : 'handoff';
+    const message = scrub(err instanceof Error ? err.message : String(err), ownerSecrets);
+    log(`[pipeline ${group.id}] ${step} failed: ${err instanceof StepError && err.cause instanceof Error ? (err.cause.stack ?? message) : message}`);
+    await say(`Stopped while ${STEP_WORDS[step]}: ${message.slice(0, 300)}. No handoff was posted for these reports.`);
+    result = { ok: false, failedStep: step, error: message, timings: timingsNow() };
+  }
+  await writeTimings(result.timings);
+  return result;
+
+  function timingsNow(): RunTimings {
+    return { groupId: group.id, startedAt, secondsByStep: { ...secs }, totalSeconds: since(t0) };
+  }
+
+  async function writeTimings(t: RunTimings): Promise<void> {
+    const line = JSON.stringify(t);
+    console.log(line);
+    const path = deps.timingsPath === undefined ? DEFAULT_TIMINGS_PATH : deps.timingsPath;
+    if (!path) return;
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      await appendFile(path, line + '\n', 'utf8');
+    } catch (err) {
+      log(`[pipeline] could not write ${path}: ${String(err)}`);
+    }
+  }
+
+  async function steps(): Promise<PipelineResult> {
+    const n = group.reports.length;
+    await say(`${n} reports look like the same problem${group.page ? ` on the ${group.page} page` : ''}. Checking monitoring, recent changes and the owners file.`);
+
+    // Report links for part 2. A missing link is not worth stopping for.
+    await Promise.all(
+      group.reports.map(async (r) => {
+        if (r.permalink) return;
+        try {
+          r.permalink = await deps.slack.getPermalink(r.channel, r.ts);
+        } catch (err) {
+          log(`[pipeline ${group.id}] no link for report ${r.ts}: ${String(err)}`);
+        }
+      }),
+    );
+
+    // Steps 3, 4 and 5 do not depend on each other.
+    const [monitoring, commits, owner] = await Promise.all([
+      timed('monitoring', secs, () => (deps.checkMonitoring ?? defaultCheckMonitoring)(group.page)),
+      timed('changes', secs, () => (deps.listRecentChanges ?? (() => defaultListRecentChanges()))()),
+      timed('owner', secs, () => (deps.findOwner ?? defaultFindOwner)(group.page)),
+    ]);
+    ownerSecrets = ownerStrings(owner);
+    await say(
+      `Monitoring and logs: ${monitoring.showsProblem ? 'they show a problem' : monitoring.unavailable ? 'could not be read' : 'nothing'}. ` +
+        `${commits.length} ${commits.length === 1 ? 'commit' : 'commits'} in the last ${config.recentDays} days. ` +
+        `${owner.githubLogin ? 'Owner found' : 'No owner found'}. Investigating the code.`,
+    );
+
+    // Step 6, with the text-only classification for step 7 started beside it.
+    const textEffect = deps.code.classifyCustomerEffect(group.reports.map((r) => r.text));
+    textEffect.catch(() => undefined); // judge reads it; this only keeps a rejection from going unhandled
+    const investigation: Investigation = await timed('investigation', secs, () => deps.code.investigate({ group, owner, monitoring, commits }));
+    await say(
+      investigation.found && investigation.commitSha
+        ? `The investigation named commit ${investigation.commitSha.slice(0, 7)}. Judging severity.`
+        : 'The investigation could not name a commit. Judging severity.',
+    );
+
+    // Part 8 starts now and runs beside the verdict and the fix.
+    const forbidden = [...ownerStrings(owner), investigation.commitSha?.slice(0, 7) ?? '', investigation.commitAuthor ?? '', investigation.file ?? ''].filter(Boolean);
+    const sentence = (deps.customerSentence ?? ((g, f) => defaultCustomerSentence(g, { forbidden: f, log })))(group, forbidden).catch((err) => {
+      log(`[pipeline ${group.id}] customer sentence threw: ${String(err)}`);
+      return null;
+    });
+
+    const verdict: Verdict = await timed('verdict', secs, () => deps.code.judge({ group, monitoring, investigation, textEffect }));
+    await say(
+      verdict.severity === 'low'
+        ? 'Severity: low. Writing the smallest fix.'
+        : 'Severity: high. No code will be changed; writing the handoff.',
+    );
+
+    let fix: FixOutcome;
+    try {
+      fix = await timed('fix', secs, () => deps.code.fix({ group, owner, investigation, verdict }));
+    } catch (err) {
+      // The handoff still matters without a pull request, so a failed fix does not stop the run.
+      const message = scrub(err instanceof Error ? err.message : String(err), ownerSecrets);
+      log(`[pipeline ${group.id}] fix failed: ${err instanceof StepError && err.cause instanceof Error ? (err.cause.stack ?? message) : message}`);
+      await say(`The fix step failed: ${message.slice(0, 300)}. The handoff follows without a pull request.`);
+      fix = { kind: 'none', prUrl: null, prNumber: null, branch: null, filesChanged: [], testsPassed: null, note: `the fix step failed: ${message.slice(0, 200)}`, seconds: secs.fix ?? 0 };
+    }
+
+    const handoff = await timed('handoff', secs, async () => {
+      const sentenceForCustomers = (await sentence) ?? fallbackCustomerSentence(group);
+      const h: Handoff = { group, monitoring, owner, investigation, verdict, fix, sentenceForCustomers };
+      return { h, message: buildHandoffMessage(h) };
+    });
+
+    const posted = await timed('post', secs, () =>
+      deps.slack.postMessage({ channel, threadTs, text: handoff.message.text, blocks: handoff.message.blocks }),
+    );
+    return { ok: true, handoff: handoff.h, handoffTs: posted.ts, timings: timingsNow() };
+  }
+}
+
+/**
+ * Runs groups one at a time, in arrival order. A group runs once: a second enqueue of the same
+ * group id is ignored, so a group that reaches the threshold twice still gets one thread.
+ */
+export class PipelineQueue {
+  private chain: Promise<unknown> = Promise.resolve();
+  private started = new Set<string>();
+
+  constructor(private readonly run: (group: ReportGroup, patternSeconds?: number) => Promise<PipelineResult>) {}
+
+  /** Resolves with the run's result, or null when the group was queued before. Never rejects. */
+  enqueue(group: ReportGroup, patternSeconds?: number): Promise<PipelineResult | null> {
+    if (this.started.has(group.id)) return Promise.resolve(null);
+    this.started.add(group.id);
+    const next = this.chain.then(() => this.run(group, patternSeconds)).catch((err) => {
+      console.error(`[queue] ${group.id} failed outside the pipeline: ${String(err)}`);
+      return null;
+    });
+    this.chain = next;
+    return next;
+  }
+
+  /** Resolves when every queued run has finished. */
+  idle(): Promise<void> {
+    return this.chain.then(() => undefined);
+  }
+}
