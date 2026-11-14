@@ -5,6 +5,7 @@
 import { config } from '../config.js';
 import type { RecentCommit } from '../types.js';
 import { GhError, ghApi, spawnTool } from './exec.js';
+import { RETRY_HTTP_STATUSES, consoleRetryLog, realSleep, redact, withGithubRetry, type RetryLog, type Sleep } from './retry.js';
 
 export type ApiGet = (path: string) => Promise<unknown>;
 
@@ -17,26 +18,56 @@ let tokenPromise: Promise<string | null> | undefined;
 const ghToken = (): Promise<string | null> =>
   (tokenPromise ??= spawnTool('gh', ['auth', 'token'], { timeoutMs: 15_000 }).then((r) => (r.code === 0 && r.stdout.trim() ? r.stdout.trim() : null)));
 
-export const githubRestApi: ApiGet = async (path) => {
-  const token = await ghToken();
-  if (!token) return ghApi(path);
-  let res: Response;
-  try {
-    res = await fetch(`https://api.github.com/${path}`, {
-      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'demo-bank-triage' },
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (err) {
-    throw new GhError(`GET ${path} failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  const text = await res.text();
-  if (!res.ok) throw new GhError(`GET ${path} failed (HTTP ${res.status}): ${text.slice(0, 300)}`);
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new GhError(`GET ${path} did not return JSON`);
-  }
-};
+export const githubRestApi: ApiGet = (path) =>
+  githubRestApiWith(path, { fetch: (url, init) => fetch(url, init), token: ghToken, ghApi: (p) => ghApi(p), sleep: realSleep, log: consoleRetryLog });
+
+export interface RestApiDeps {
+  fetch: (url: string, init: RequestInit) => Promise<Response>;
+  token: () => Promise<string | null>;
+  /** Used for every call when there is no token; it tries again on its own. */
+  ghApi: ApiGet;
+  sleep: Sleep;
+  log: RetryLog;
+}
+
+/** githubRestApi with fetch, the token, gh and the pause injected. Tried again: a rejected fetch and HTTP 429/5xx. */
+export async function githubRestApiWith(path: string, deps: RestApiDeps): Promise<unknown> {
+  const token = await deps.token();
+  if (!token) return deps.ghApi(path);
+  return withGithubRetry<unknown>(
+    path,
+    async () => {
+      let res: Response;
+      let text: string;
+      try {
+        res = await deps.fetch(`https://api.github.com/${path}`, {
+          headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'demo-bank-triage' },
+          signal: AbortSignal.timeout(30_000),
+        });
+        // A connection that drops while the body is read is the same network failure.
+        text = await res.text();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const cause = err instanceof Error && err.cause instanceof Error ? ` (${(err.cause as { code?: string }).code ?? err.cause.message})` : '';
+        return { ok: false, error: new GhError(redact(`GET ${path} failed: ${message}`, token)), retry: true, reason: `${message}${cause}` };
+      }
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: new GhError(redact(`GET ${path} failed (HTTP ${res.status}): ${text.slice(0, 300)}`, token)),
+          retry: RETRY_HTTP_STATUSES.has(res.status),
+          reason: `HTTP ${res.status}: ${text}`,
+        };
+      }
+      try {
+        return { ok: true, value: JSON.parse(text) as unknown };
+      } catch {
+        return { ok: false, error: new GhError(`GET ${path} did not return JSON`), retry: false, reason: 'not JSON' };
+      }
+    },
+    { sleep: deps.sleep, log: deps.log, secret: token },
+  );
+}
 
 export interface ChangesOptions {
   repos?: readonly string[];

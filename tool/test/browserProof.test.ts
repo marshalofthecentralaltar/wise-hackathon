@@ -151,11 +151,22 @@ describe('the reproduction beside investigate', () => {
 
   it('a check that never finishes does not hold up investigate', async () => {
     const slack = new FakeSlack();
+    // The check is called only after the reproduction start is written to disk, which can take
+    // longer than investigate: wait for the real call before releasing it, never a fixed sleep.
     let release: (r: CheckRun) => void = () => undefined;
-    const d = proofDeps(slack, { runCheck: () => new Promise<CheckRun>((r) => (release = r)) });
+    let markCalled: () => void = () => undefined;
+    const called = new Promise<void>((r) => (markCalled = r));
+    const d = proofDeps(slack, {
+      runCheck: () =>
+        new Promise<CheckRun>((r) => {
+          release = r;
+          markCalled();
+        }),
+    });
     const wrapped = withReproduction(steps(), d);
     const r = await wrapped.investigate({ group: group('g-hang'), owner: OWNER, monitoring: MONITORING, commits: [] });
     expect(r).toBe(INVESTIGATION);
+    await called;
     expect(slack.posted).toEqual([]);
     // Let the check end, so no background work outlives this test.
     release(FLICKER_REPRODUCED);

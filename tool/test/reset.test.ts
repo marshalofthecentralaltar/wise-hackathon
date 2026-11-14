@@ -149,7 +149,7 @@ describe('restoreMain', () => {
 
   it('main already at the planted commit: zero calls', async () => {
     const gh = standInGitHub({ main: P });
-    const r = await restoreMain({ repo: CARD_APP_REPO, api: gh.api, planted: 'ee38468', toolAuthor: TOOL });
+    const r = await restoreMain({ repo: CARD_APP_REPO, api: gh.api, planted: P.slice(0, 7), toolAuthor: TOOL });
     expect(gh.refCalls).toEqual([]);
     expect(r.status).toBe('not-needed');
     expect(r.mainNow).toBe(P);
