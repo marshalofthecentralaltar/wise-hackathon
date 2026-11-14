@@ -40,7 +40,7 @@ type = sqlite3
 path = {{DATA}}/grafana.db
 
 [log]
-mode = console
+mode = file
 level = info
 
 [plugins]

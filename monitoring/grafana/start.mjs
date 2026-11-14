@@ -30,7 +30,7 @@ const provisioningDir = path.join(runDir, 'grafana-provisioning');
 const archivePath = path.join(runDir, ARCHIVE);
 const exePath = path.join(installDir, 'bin', 'grafana.exe');
 const iniPath = path.join(runDir, 'grafana.ini');
-const logPath = path.join(runDir, 'grafana.log');
+const logPath = path.join(runDir, 'grafana-logs', 'grafana.log');
 const pidPath = path.join(runDir, 'grafana.pid');
 
 const startedAt = Date.now();
@@ -241,16 +241,36 @@ if (!fs.existsSync(exePath)) {
 
 // 3. Settings, then start as a process that outlives this script.
 writeSettingFiles();
-const out = fs.openSync(logPath, 'a');
-const child = spawn(exePath, ['server', '--homepath', installDir, '--config', iniPath], {
-  detached: true,
-  stdio: ['ignore', out, out],
+// Grafana runs each data source plugin as its own console program. A detached Grafana has no
+// console, so Windows 11 opened a Terminal window for Grafana and for every plugin (15 on 14 Nov).
+// PowerShell, started without a window, starts Grafana inside its own invisible console, which
+// the plugins then share. Grafana is a grandchild, so it outlives this script. Grafana writes its
+// own log ([log] mode = file).
+const psQuote = (s) => `'${s.replace(/'/g, "''")}'`;
+const launch = [
+  '$i = New-Object System.Diagnostics.ProcessStartInfo',
+  `$i.FileName = ${psQuote(exePath)}`,
+  `$i.Arguments = ${psQuote(`server --homepath "${installDir}" --config "${iniPath}"`)}`,
+  `$i.WorkingDirectory = ${psQuote(installDir)}`,
+  '$i.UseShellExecute = $false',
+  '([System.Diagnostics.Process]::Start($i)).Id',
+].join('; ');
+// Grafana inherits PowerShell's output handles, so they are a file and not a pipe: a pipe would
+// stay open as long as Grafana runs and this script would wait for it.
+const launchOut = path.join(runDir, 'grafana-launch.txt');
+const launchFd = fs.openSync(launchOut, 'w');
+const started = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', launch], {
+  stdio: ['ignore', launchFd, launchFd],
   windowsHide: true,
-  cwd: installDir,
 });
-child.unref();
-fs.writeFileSync(pidPath, String(child.pid));
-say(`Grafana process ${child.pid} started; waiting for http://localhost:${PORT}`);
+fs.closeSync(launchFd);
+const launchText = fs.readFileSync(launchOut, 'utf8').trim();
+const grafanaPid = Number(launchText);
+if (!Number.isInteger(grafanaPid) || grafanaPid <= 0) {
+  fail(`Grafana did not start: ${launchText || String(started.error ?? `powershell exit ${started.status}`)}`);
+}
+fs.writeFileSync(pidPath, String(grafanaPid));
+say(`Grafana process ${grafanaPid} started; waiting for http://localhost:${PORT}`);
 
 // 4. Ready when the page and the dashboard answer.
 await waitForReady();
