@@ -9,11 +9,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { makeEventWriter, type ToolEvent } from '../src/events.js';
+import { capDiff, DIFF_CAP, lastCommitDiff } from '../src/fix.js';
 import { runPipeline, type PipelineDeps, type PipelineResult } from '../src/pipeline.js';
 import { FakeSlack } from '../src/slackPost.js';
 import { checkMonitoring, errorRateQuery, upQuery } from '../src/steps/monitoring.js';
 import type { CodeSteps, FixOutcome, Investigation, MonitoringFinding, Owner, RecentCommit, ReportGroup, Verdict } from '../src/types.js';
 import { FIX_PR, INVESTIGATION, LOW, MONITORING, OWNER, group } from './fixtures-b2.js';
+import { newRepo, writeAndCommit } from './gitRepo.js';
 
 /** Issue #20, "The file it reads": the evidence fields of each step's done line. */
 const CONTRACT: Record<string, string[]> = {
@@ -427,4 +429,25 @@ describe('events file: samples for the process screen', () => {
       expect(verdict.severity).toBe(kind === 'flicker' ? 'low' : 'high');
     });
   }
+});
+
+describe('fix diff: what FixOutcome.diff is made from', () => {
+  it('lastCommitDiff gives the last commit, new files included; capDiff keeps it within 4,000 characters', async () => {
+    const repo = newRepo('events-diff-');
+    try {
+      writeAndCommit(repo.dir, { 'src/pages/card/Card.tsx': 'line 1\nstate bad\n' }, 'base');
+      writeAndCommit(repo.dir, { 'src/pages/card/Card.tsx': 'line 1\nstate good\n', 'src/pages/card/New.tsx': 'export const x = 1;\n' }, 'fix');
+      const diff = await lastCommitDiff(repo.dir);
+      expect(diff).toContain('-state bad');
+      expect(diff).toContain('+state good');
+      expect(diff).toContain('+++ b/src/pages/card/New.tsx');
+      expect(await lastCommitDiff(join(repo.dir, 'no-such-folder'))).toBeNull();
+    } finally {
+      repo.cleanup();
+    }
+    const long = 'x'.repeat(10_000);
+    expect(capDiff(long).length).toBe(DIFF_CAP);
+    expect(capDiff(long)).toMatch(/diff cut at 4,000 characters/);
+    expect(capDiff('short')).toBe('short');
+  });
 });
