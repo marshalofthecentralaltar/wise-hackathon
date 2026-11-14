@@ -16,6 +16,7 @@ import { buildHandoffMessage, draftCustomerSentence, esc, finalCustomerSentence 
 import type { SlackPort } from './slackPost.js';
 import { listRecentChanges as defaultListRecentChanges } from './steps/changes.js';
 import { checkMonitoring as defaultCheckMonitoring } from './steps/monitoring.js';
+import { grafanaLink } from './grafana.js';
 import { findOwner as defaultFindOwner, readOwnersMap } from './steps/owner.js';
 import type {
   CodeSteps,
@@ -284,8 +285,9 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
     ]);
     ownerSecrets = ownerStrings(owner);
     monitoringSource = monitoring.source;
+    const grafana = grafanaLink(group);
     await say(
-      `Monitoring and logs: ${monitoring.showsProblem ? 'they show a problem' : monitoring.unavailable ? 'could not be read' : 'nothing'}. ` +
+      `Monitoring and logs: ${monitoring.showsProblem ? 'they show a problem' : monitoring.unavailable ? 'could not be read' : 'nothing'}${grafana ? ` (${grafana})` : ''}. ` +
         `${commits.length} ${commits.length === 1 ? 'commit' : 'commits'} in the last ${config.recentDays} days. ` +
         `${owner.githubLogin ? 'Owner found' : 'No owner found'}. Investigating the code.`,
     );

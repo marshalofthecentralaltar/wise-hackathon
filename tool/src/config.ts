@@ -16,6 +16,8 @@ export const config = {
   /** Where the running card app answers. */
   appBaseUrl: env('APP_BASE_URL', 'http://localhost:3000'),
   prometheusUrl: env('PROMETHEUS_URL', 'http://localhost:9090'),
+  /** Grafana from monitoring/grafana/ (a screen only), linked from the thread. `off` leaves the link out. */
+  grafanaUrl: env('GRAFANA_URL', 'http://localhost:3100'),
   /** The card app's request log, one JSON object per line. */
   requestLogFile: paths.requestLogFile, // REQUEST_LOG_FILE overrides (src/paths.ts)
   /** How far back step 4 lists commits. */
