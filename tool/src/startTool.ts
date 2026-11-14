@@ -10,6 +10,7 @@ import { readEnv } from './env.js';
 import { fixStep } from './fixStep.js';
 import { APPROVE_ACTION_ID } from './handoff.js';
 import { investigate } from './investigate.js';
+import { eventsPath, makeEventWriter } from './events.js';
 import { makeMessageHandler } from './listener.js';
 import { PipelineQueue, runPipeline } from './pipeline.js';
 import type { OwnIdentity, SlackMessageEvent } from './slack.js';
@@ -88,8 +89,9 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
 
   const slack = webSlackPort(client);
   const lookupSlackUser = slackLookup(env.slackBotToken);
+  const emit = makeEventWriter(eventsPath());
   const queue = new PipelineQueue((group, patternSeconds) =>
-    runPipeline(group, { code: codeSteps, slack, patternSeconds, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
+    runPipeline(group, { code: codeSteps, slack, patternSeconds, emit, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
   );
 
   const onMessage = makeMessageHandler({

@@ -158,12 +158,13 @@ export async function checkMonitoring(page: Page | null, opts: MonitoringOptions
   let monitoringProblem = false;
   let errorCount5xx: number | undefined;
   let unavailable = false;
+  const rateQuery = errorRateQuery(path);
 
   try {
     const signal = AbortSignal.timeout(opts.prometheusTimeoutMs ?? 3_000);
     const q = (query: string) => getJson(`${prometheusUrl}/api/v1/query?query=${encodeURIComponent(query)}`, signal);
     const [rate, increase, p95, alerts, up] = await Promise.all([
-      q(errorRateQuery(path)),
+      q(rateQuery),
       q(errorCountQuery(path)),
       q(p95Query(path)),
       getJson(`${prometheusUrl}/api/v1/alerts`, signal),
@@ -223,6 +224,7 @@ export async function checkMonitoring(page: Page | null, opts: MonitoringOptions
     source,
     errorsPerSecond,
     ...(errorCount5xx === undefined ? {} : { errorCount5xx }),
+    ...(source === 'prometheus' ? { query: rateQuery } : {}),
     ...(unavailable ? { unavailable } : {}),
     alertsFiring,
     p95Seconds,

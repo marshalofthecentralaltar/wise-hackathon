@@ -28,6 +28,26 @@ export interface FixSuccess {
   claudeSummary: string;
   claudeTurns: number | null;
   claude: ClaudeRunInfo;
+  /** `git diff HEAD~1 HEAD` of the pushed commit, capped by capDiff; null when it could not be read. */
+  diff?: string | null;
+}
+
+export const DIFF_CAP = 4_000;
+const DIFF_CUT_NOTE = '\n[diff cut at 4,000 characters]\n';
+
+/** A diff no longer than DIFF_CAP characters, the note included. */
+export function capDiff(diff: string): string {
+  return diff.length <= DIFF_CAP ? diff : diff.slice(0, DIFF_CAP - DIFF_CUT_NOTE.length) + DIFF_CUT_NOTE;
+}
+
+/** The last commit's unified diff in `cwd`, capped; null when git fails. Never throws. */
+export async function lastCommitDiff(cwd: string): Promise<string | null> {
+  try {
+    const r = await run('git', ['diff', '--no-color', '--no-ext-diff', 'HEAD~1', 'HEAD'], { cwd, timeoutMs: 10_000 });
+    return r.code === 0 ? capDiff(r.stdout) : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface FixFailure {
@@ -498,7 +518,8 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
     const r = await run('git', args, { cwd, timeoutMs: 10_000 });
     if (r.code !== 0) return fail('push', `git ${args.join(' ').slice(0, 40)} failed`, r.stderr + r.stdout, branch);
   }
-  const push = await run('git', ['push', '-q', '-u', 'origin', branch], { cwd, timeoutMs: NETWORK_TIMEOUT_MS });
+  const diff = await lastCommitDiff(cwd);
+  const push =await run('git', ['push', '-q', '-u', 'origin', branch], { cwd, timeoutMs: NETWORK_TIMEOUT_MS });
   done('push', t0);
   if (push.code !== 0) return fail('push', 'git push failed', push.stderr + push.stdout, branch);
 
@@ -523,7 +544,7 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
 
   seconds.total = secondsSince(tStart);
   if (ownCopy) await rm(workdir, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
-  return { ok: true, prUrl: pr.url, branch, seconds, filesChanged, claudeSummary, claudeTurns, claude: claudeRun };
+  return { ok: true, prUrl: pr.url, branch, seconds, filesChanged, claudeSummary, claudeTurns, claude: claudeRun, diff };
 }
 
 export interface ClaudeRunInfo {
