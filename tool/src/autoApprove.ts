@@ -84,3 +84,16 @@ export async function approveFromThread(opts: AutoApproveOptions): Promise<AutoA
   const result = await (opts.approve ?? handleApprovePress)(press, { ...opts.approveDeps, slack: opts.slack });
   return { pressed: true, result, owner: value.owner, pr: value.pr, repo: value.repo, messageTs: found.messageTs };
 }
+
+/**
+ * The newest top-level message in the channel whose thread still carries an "Approve fix" button.
+ * `history` is newest first, as conversations.history returns it. Null when no thread has one.
+ */
+export async function newestThreadWithButton(history: ThreadMessage[], channel: string, read: ThreadReader): Promise<string | null> {
+  for (const m of history) {
+    const isTopLevel = !m.thread_ts || m.thread_ts === m.ts;
+    if (!m.ts || !isTopLevel || !(m as { reply_count?: number }).reply_count) continue;
+    if (findApproveButton(await read(channel, m.ts))) return m.ts;
+  }
+  return null;
+}

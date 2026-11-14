@@ -16,6 +16,7 @@
     "doctor": "tsx scripts/doctor.ts",
     "post-reports": "tsx --import ./src/loadSecrets.ts scripts/post-reports.ts",
     "full-run": "tsx --import ./src/loadSecrets.ts scripts/full-run.ts",
+    "approve-latest": "tsx --import ./src/loadSecrets.ts scripts/approve-latest.ts",
     "counted-runs": "tsx scripts/counted-runs.ts",
     "demo-start": "tsx scripts/demo-start.ts",
     "demo-stop": "tsx scripts/demo-stop.ts"
