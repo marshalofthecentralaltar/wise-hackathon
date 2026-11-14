@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo Bank Helpdesk: inbox</title>
+<style>
+  :root { --ink:#1d2433; --muted:#5b6475; --line:#d5d9e2; --bg:#f4f5f8; --card:#fff; --accent:#2f5d8a;
+          --new:#6b7280; --checking:#b7791f; --sent:#2f7d4f; --held:#a3282c; --pii:#ffe08a; --marker:#dfe7f1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+  header { display:flex; align-items:baseline; gap:12px; padding:14px 18px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:1.25rem; margin:0; }
+  header .sub { color:var(--muted); font-size:.95rem; }
+  header .dry { margin-left:auto; font-size:.85rem; font-weight:600; color:var(--checking); }
+  .wrap { display:flex; flex-direction:column; gap:14px; padding:14px 18px 30px; }
+  .list { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .row { display:grid; grid-template-columns:78px 56px 96px 1fr auto; gap:10px; align-items:center; padding:9px 12px; border-top:1px solid var(--line); cursor:pointer; }
+  .row:first-child { border-top:0; }
+  .row:hover { background:#f8f9fb; }
+  .row.sel { background:#eef3f9; }
+  .row .id { font-weight:700; }
+  .row .time, .row .page { color:var(--muted); font-size:.92rem; }
+  .row .first { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { font-size:.82rem; font-weight:700; padding:3px 9px; border-radius:99px; color:#fff; white-space:nowrap; }
+  .s-New { background:var(--new); } .s-Checking { background:var(--checking); }
+  .s-Sent { background:var(--sent); } .s-Held, .s-Post { background:var(--held); }
+  .empty { padding:22px; color:var(--muted); text-align:center; }
+  .detail { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .pane { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; min-width:0; }
+  .pane h2 { font-size:1rem; margin:0 0 10px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0 0 12px; font-size:.95rem; }
+  dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+  .text { white-space:pre-wrap; overflow-wrap:anywhere; }
+  mark { background:var(--pii); padding:0 2px; border-radius:3px; }
+  .marker { background:var(--marker); border-radius:3px; padding:0 2px; font-weight:600; }
+  .slack { background:#f7f8fa; border-left:4px solid var(--accent); padding:10px 12px; border-radius:4px; }
+  img.shot { max-width:100%; border:1px solid var(--line); border-radius:6px; margin-top:10px; }
+  ul.removed { margin:10px 0 0; padding-left:20px; font-size:.95rem; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .held { border:1px solid var(--held); border-radius:8px; padding:10px 12px; margin-top:12px; }
+  .held textarea { width:100%; min-height:110px; font:inherit; padding:8px; border:1px solid var(--line); border-radius:6px; margin-top:8px; }
+  .held button, .retry { margin-top:8px; font:inherit; font-weight:600; padding:8px 14px; color:#fff; background:var(--accent); border:0; border-radius:6px; cursor:pointer; }
+  .err { color:var(--held); margin-top:6px; }
+  a { color:var(--accent); }
+  @media (max-width: 760px) { .detail { grid-template-columns:1fr; } .row { grid-template-columns:70px 1fr auto; } .row .time, .row .page { display:none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Demo Bank Helpdesk</h1><span class="sub">Inbox, live. Only PII-safe text goes to #support.</span>
+  <span class="dry" id="dry" hidden>DRY RUN: nothing is posted to Slack</span>
+</header>
+<div class="wrap">
+  <div class="list" id="list"><div class="empty">Waiting for the first ticket</div></div>
+  <div class="detail" id="detail" hidden>
+    <section class="pane" id="left"></section>
+    <section class="pane" id="right"></section>
+  </div>
+</div>
+<script>
+const tickets = new Map();
+let selected = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const time = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+const PAGE = { card:'Card', transfers:'Transfers', account:'Account', other:'Other' };
+const KIND = { name:'name', email:'email', phone:'phone', customerNumber:'customer number', card:'card number', iban:'account number', dob:'date of birth', address:'address', other:'other personal data' };
+const badgeClass = (s) => 's-' + String(s).split(' ')[0];
+
+// Highlights every removed value in a piece of the customer's own text.
+function highlight(text, removed) {
+  const values = [...new Set((removed || []).map((r) => r.value).filter((v) => v && v.length >= 2))].sort((a, b) => b.length - a.length);
+  if (!values.length) return esc(text);
+  const re = new RegExp(values.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'giu');
+  let out = '', at = 0;
+  for (const m of String(text).matchAll(re)) { out += esc(text.slice(at, m.index)) + '<mark>' + esc(m[0]) + '</mark>'; at = m.index + m[0].length; }
+  return out + esc(text.slice(at));
+}
+const markers = (text) => esc(text).replace(/\[(name|email|phone|customer number|card number|account number|date of birth|address|personal data)\]/g, '<span class="marker">[$1]</span>');
+
+function renderList() {
+  const all = [...tickets.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  if (!all.length) { $('list').innerHTML = '<div class="empty">Waiting for the first ticket</div>'; return; }
+  $('list').innerHTML = all.map((t) => `<div class="row${t.id === selected ? ' sel' : ''}" data-id="${esc(t.id)}">
+    <span class="id">${esc(t.id)}</span><span class="time">${esc(time(t.createdAt).slice(0, 5))}</span>
+    <span class="page">${esc(PAGE[t.page] || '')}</span><span class="first">${esc((t.text || '').split('\n')[0])}</span>
+    <span class="badge ${badgeClass(t.status)}">${esc(t.status)}</span></div>`).join('');
+}
+
+function renderDetail() {
+  const t = tickets.get(selected);
+  if (!t) { $('detail').hidden = true; return; }
+  $('detail').hidden = false;
+  const rm = t.removed || [];
+  $('left').innerHTML = `<h2>Customer ticket</h2>
+    <dl>
+      <dt>Ticket</dt><dd>${esc(t.id)} at ${esc(time(t.createdAt))}</dd>
+      <dt>Name</dt><dd><mark>${esc(t.name)}</mark></dd>
+      <dt>Email</dt><dd><mark>${esc(t.email)}</mark></dd>
+      ${t.phone ? `<dt>Phone</dt><dd><mark>${esc(t.phone)}</mark></dd>` : ''}
+      ${t.customerNumber ? `<dt>Customer no.</dt><dd><mark>${esc(t.customerNumber)}</mark></dd>` : ''}
+      <dt>Page</dt><dd>${esc(PAGE[t.page] || t.page)}</dd>
+      <dt>Browser</dt><dd class="muted">${esc(t.userAgent)}</dd>
+    </dl>
+    <div class="text">${highlight(t.text, rm)}</div>
+    ${t.screenshotUrl ? `<img class="shot" alt="Screenshot from the customer" src="${esc(t.screenshotUrl)}">` : ''}`;
+
+  let right = `<h2>Sent to #support</h2><p><span class="badge ${badgeClass(t.status)}">${esc(t.status)}</span></p>`;
+  if (t.slackText) right += `<div class="slack text">${markers(t.slackText)}</div>`;
+  else if (t.status === 'New' || t.status === 'Checking') right += '<p class="muted">Removing personal data: rules, then a Claude check, then the leak gate.</p>';
+  if (t.slackLink) right += `<p><a href="${esc(t.slackLink)}" target="_blank" rel="noopener">Open the message in Slack</a></p>`;
+  if (t.dryRun && t.status === 'Sent to #support') right += '<p class="muted">Dry run: printed by the server, not posted.</p>';
+  if (t.secondsToSlack != null) right += `<p class="muted">${esc(t.secondsToSlack)} s from the customer pressing send to the Slack post (measured).</p>`;
+  if (t.describeError) right += `<p class="muted">Screenshot not described: ${esc(t.describeError)}</p>`;
+  if (rm.length) right += `<div class="muted">Removed:</div><ul class="removed">${rm.map((r) => `<li>${esc(KIND[r.kind] || r.kind)}, by ${r.by === 'claude' ? 'Claude check' : 'rule'}</li>`).join('')}</ul>`;
+  if (t.status === 'Post failed') right += `<p class="err">Slack said: ${esc(t.postError)}</p><button class="retry" data-retry="${esc(t.id)}">Try again</button>`;
+  if (t.status === 'Held') right += `<div class="held"><strong>Held:</strong> ${esc(t.heldReason)}
+      <textarea id="edit">${esc(t.proposedText || '')}</textarea>
+      <button data-send="${esc(t.id)}">Send to #support</button><div class="err" id="edit-err"></div></div>`;
+  const keep = document.activeElement && document.activeElement.id === 'edit' ? $('edit').value : null;
+  $('right').innerHTML = right;
+  if (keep !== null && $('edit')) { $('edit').value = keep; $('edit').focus(); }
+}
+
+document.addEventListener('click', async (e) => {
+  const row = e.target.closest('.row');
+  if (row) { selected = row.dataset.id; renderList(); renderDetail(); return; }
+  const send = e.target.closest('[data-send]');
+  if (send) {
+    const res = await fetch(`/api/inbox/tickets/${send.dataset.send}/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: $('edit').value }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { $('edit-err').textContent = data.error || 'Not sent'; if (data.proposedText != null) $('edit').value = data.proposedText; }
+    return;
+  }
+  const retry = e.target.closest('[data-retry]');
+  if (retry) await fetch(`/api/inbox/tickets/${retry.dataset.retry}/retry`, { method: 'POST' });
+});
+
+function upsert(t) {
+  // A new ticket opens itself, so the screen follows the newest one on stage.
+  if (!tickets.has(t.id) || !selected) selected = t.id;
+  tickets.set(t.id, t);
+  renderList();
+  if (t.id === selected) renderDetail();
+}
+
+fetch('/api/inbox/tickets').then((r) => r.json()).then((d) => {
+  $('dry').hidden = !d.dryRun;
+  for (const t of d.tickets) tickets.set(t.id, t);
+  selected = d.tickets[0]?.id ?? null;
+  renderList(); renderDetail();
+  const es = new EventSource('/api/inbox/events');
+  es.onmessage = (ev) => { try { upsert(JSON.parse(ev.data)); } catch {} };
+});
+</script>
+</body>
+</html>
