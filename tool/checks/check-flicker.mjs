@@ -1,5 +1,7 @@
 // Opens /card, keeps a handle to the #card-picture node, watches it for 5 seconds.
-// Prints {"card_picture_replaced":bool,"balance_changed":bool,"min_opacity_seen":n}
+// Prints {"card_picture_replaced":bool,"balance_changed":bool,"min_opacity_seen":n,...,
+//         "card_picture_replacements":n,"seconds_watched":s} (the last two: how many times a new
+//         #card-picture node appeared, and for how long it was watched)
 // --expect replaced : pass when the node was replaced, the balance changed and opacity dipped below 0.5
 // --expect stable   : pass when the node was never replaced (and the picture stayed visible)
 // no --expect       : pass when the node was never replaced
@@ -38,9 +40,15 @@ try {
         let balanceChanged = false;
         let minOpacity = 1;
         let count = 0;
+        let replacements = 0;
+        let last = original;
         const timer = setInterval(() => {
           const current = document.getElementById("card-picture");
           if (current !== original || !original.isConnected) replaced = true;
+          if (current && current !== last) {
+            replacements += 1;
+            last = current;
+          }
           if (current) minOpacity = Math.min(minOpacity, Number(getComputedStyle(current).opacity));
           const balanceNow = document.getElementById("balance")?.textContent ?? "";
           if (balanceNow !== balanceAtStart) balanceChanged = true;
@@ -48,7 +56,7 @@ try {
         }, 100);
         setTimeout(() => {
           clearInterval(timer);
-          resolve({ replaced, balanceChanged, minOpacity, count });
+          resolve({ replaced, balanceChanged, minOpacity, count, replacements });
         }, watchMs);
       }),
     { original, watchMs: WATCH_MS },
@@ -60,6 +68,8 @@ try {
     min_opacity_seen: Math.round(samples.minOpacity * 1000) / 1000,
     samples: samples.count,
     console_errors: consoleErrors.length,
+    card_picture_replacements: samples.replacements,
+    seconds_watched: Math.round(WATCH_MS / 100) / 10,
   };
 } catch (error) {
   await browser.close();
