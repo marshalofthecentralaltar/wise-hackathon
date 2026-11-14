@@ -4,7 +4,8 @@
 // "Support Desk" app. Node 22 built-ins only. Nothing personal is printed or logged.
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { networkInterfaces } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './lib/store.mjs';
 import { processEdit, processTicket } from './lib/pipeline.mjs';
@@ -15,7 +16,8 @@ import { readTicketInput, isLocal, BODY_LIMIT } from './lib/http.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const dryRun = argv.includes('--dry-run');
-const port = Number(argv[argv.indexOf('--port') + 1]) || Number(process.env.HELPDESK_PORT) || 3400;
+const portArg = argv.includes('--port') ? argv[argv.indexOf('--port') + 1] : process.env.HELPDESK_PORT;
+const port = portArg !== undefined && /^\d+$/.test(portArg) ? Number(portArg) : 3400; // 0 picks a free port (tests)
 const stateDir = process.env.HELPDESK_STATE_DIR || join(here, '.state');
 
 const store = openStore(stateDir);
@@ -33,8 +35,8 @@ const clients = new Set();
 const say = (line) => console.log(`[helpdesk] ${line}`);
 
 function publicView(t) {
-  const { screenshotPath, ...rest } = t;
-  return { ...rest, screenshotUrl: screenshotPath ? `/screenshots/${basename(screenshotPath)}` : null };
+  const { screenshotFile, ...rest } = t;
+  return { ...rest, screenshotUrl: screenshotFile ? `/screenshots/${screenshotFile}` : null };
 }
 
 function broadcast(t) {
@@ -65,7 +67,7 @@ async function sendToSlack(id, text, removed) {
 async function check(id) {
   update(id, { status: 'Checking' });
   const t = store.get(id);
-  const r = await processTicket(t, deps);
+  const r = await processTicket({ ...t, screenshotPath: store.screenshotPath(t) }, deps);
   if (r.describeError) store.update(id, { describeError: r.describeError });
   if (r.status === 'held') {
     update(id, { status: 'Held', heldReason: r.reason, proposedText: r.proposedText, removed: r.removed });
@@ -110,7 +112,7 @@ const server = createServer(async (req, res) => {
       const input = readTicketInput(body, req.headers['user-agent'] ?? '');
       if (input.error) return json(res, 400, { error: input.error });
       const t = store.create({ ...input.fields, createdAt: new Date().toISOString() });
-      if (input.screenshot) store.update(t.id, { screenshotPath: store.saveScreenshot(t.id, input.screenshot.ext, input.screenshot.bytes) });
+      if (input.screenshot) store.update(t.id, { screenshotFile: store.saveScreenshot(t.id, input.screenshot.ext, input.screenshot.bytes) });
       broadcast(t);
       say(`${t.id} New`);
       json(res, 201, { id: t.id });
@@ -133,9 +135,9 @@ const server = createServer(async (req, res) => {
     const shot = /^\/screenshots\/(T-\d+\.(?:png|jpg))$/.exec(path);
     if (req.method === 'GET' && shot) {
       const t = store.get(shot[1].split('.')[0]);
-      if (!t?.screenshotPath) return json(res, 404, { error: 'no such screenshot' });
+      if (t?.screenshotFile !== shot[1]) return json(res, 404, { error: 'no such screenshot' });
       res.writeHead(200, { 'content-type': shot[1].endsWith('png') ? 'image/png' : 'image/jpeg', 'cache-control': 'no-store' });
-      return res.end(readFileSync(t.screenshotPath));
+      return res.end(readFileSync(store.screenshotPath(t)));
     }
     const act = /^\/api\/inbox\/tickets\/(T-\d+)\/(send|retry)$/.exec(path);
     if (req.method === 'POST' && act) {
@@ -166,8 +168,25 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, '0.0.0.0', () => {
-  say(`form on http://localhost:${port}/ (open on the network), inbox on http://localhost:${port}/inbox (this computer only)`);
+/** The addresses phones on the same network can use. */
+function networkAddresses() {
+  return Object.values(networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') console.error(`[helpdesk] port ${port} is already in use: another helpdesk is running, or something else is. Stop it, or start with --port <other>.`);
+  else console.error(`[helpdesk] could not start: ${err.message}`);
+  process.exit(1);
+});
+
+// No host given: Node listens on IPv6 and IPv4 together where it can, so "localhost" works
+// whether it resolves to ::1 (common on Windows) or 127.0.0.1.
+server.listen(port, () => {
+  const p = server.address().port;
+  say(`listening on port ${p}`);
+  say(`inbox (this computer only): http://localhost:${p}/inbox`);
+  say(`form: http://localhost:${p}/`);
+  for (const a of networkAddresses()) say(`form from a phone on the same network: http://${a}:${p}/`);
   if (dryRun) say('dry run: Slack messages are printed, not posted');
   else if (!slack.token) say(`SLACK_TEST_BOT_TOKEN is empty in ${slack.file}; posts will fail (use --dry-run to print them)`);
 });

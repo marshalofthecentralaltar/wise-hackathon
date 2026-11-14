@@ -3,25 +3,36 @@
 // session file, a fixed tool list, structured JSON out. The helpdesk cannot import from tool/.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { win32 as win } from 'node:path';
 
 export const CLAUDE_LIMIT_MS = 20_000;
 const MODEL = (process.env.HELPDESK_MODEL ?? '').trim() || 'haiku';
 
-/** On Windows `claude` is a .cmd shim that Node will not spawn without a shell; use the .exe behind it. */
-function claudeExecutable() {
-  const override = (process.env.CLAUDE_BIN_PATH_FOR_TOOL ?? '').trim();
-  if (override) return override;
-  if (process.platform !== 'win32') return 'claude';
-  const where = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true });
-  const hits = (where.stdout ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+/**
+ * How to start `claude`: {cmd, prefix}. On Windows `claude` is a .cmd shim that Node will not
+ * spawn without a shell, so the real claude.exe behind it is used: from `where claude`, then the
+ * npm global folder, then Anthropic's own installer folder. CLAUDE_BIN_PATH_FOR_TOOL overrides
+ * (as in the tool); a .js or .mjs override runs with this Node, which the tests use.
+ */
+export function claudeLauncher({ platform = process.platform, env = process.env, where = whereClaude, exists = existsSync } = {}) {
+  const override = (env.CLAUDE_BIN_PATH_FOR_TOOL ?? '').trim();
+  if (override) return /\.m?js$/i.test(override) ? { cmd: process.execPath, prefix: [override] } : { cmd: override, prefix: [] };
+  if (platform !== 'win32') return { cmd: 'claude', prefix: [] };
+  const hits = where();
   const exe = hits.find((h) => h.toLowerCase().endsWith('.exe'));
-  if (exe) return exe;
-  for (const hit of hits) {
-    const candidate = join(dirname(hit), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
-    if (existsSync(candidate)) return candidate;
-  }
-  return 'claude';
+  if (exe) return { cmd: exe, prefix: [] };
+  const candidates = [
+    ...hits.map((h) => win.join(win.dirname(h), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')),
+    env.APPDATA ? win.join(env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe') : '',
+    env.USERPROFILE ? win.join(env.USERPROFILE, '.local', 'bin', 'claude.exe') : '',
+  ].filter(Boolean);
+  const found = candidates.find((c) => exists(c));
+  return { cmd: found ?? 'claude.exe', prefix: [] };
+}
+
+function whereClaude() {
+  const r = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true });
+  return (r.stdout ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 }
 
 function args({ tools, schema }) {
@@ -59,7 +70,8 @@ function ask(prompt, opts, limitMs = CLAUDE_LIMIT_MS) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(claudeExecutable(), args(opts), { cwd: opts.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      const { cmd, prefix } = claudeLauncher();
+      child = spawn(cmd, [...prefix, ...args(opts)], { cwd: opts.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       resolve({ error: `claude did not start: ${err.message}` });
       return;
@@ -78,7 +90,8 @@ function ask(prompt, opts, limitMs = CLAUDE_LIMIT_MS) {
     }, limitMs);
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', () => {});
-    child.on('error', (err) => finish({ error: `claude did not start: ${err.message}` }));
+    child.on('error', (err) => finish({ error: err.code === 'ENOENT' ? 'claude was not found; install it with npm install -g @anthropic-ai/claude-code' : `claude did not start: ${err.message}` }));
+    child.stdin.on('error', () => {}); // the process may exit before it reads the prompt
     child.on('close', (code) => {
       const answer = extractStructured(out);
       finish(answer ? { answer } : { error: `claude gave no usable answer (exit ${code})` });

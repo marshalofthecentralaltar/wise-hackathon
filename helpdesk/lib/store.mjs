@@ -49,10 +49,12 @@ export function openStore(dir) {
       appendFileSync(file, JSON.stringify({ type: 'update', id, patch }) + '\n');
       return t;
     },
+    /** Saves the image and returns its file name; the store keeps names, not paths, so the folder can move. */
     saveScreenshot(id, ext, bytes) {
       const name = `${id}.${ext}`;
       writeFileSync(join(dir, 'screenshots', name), bytes);
-      return join(dir, 'screenshots', name);
+      return name;
     },
+    screenshotPath: (t) => (t?.screenshotFile ? join(dir, 'screenshots', t.screenshotFile) : null),
   };
 }
