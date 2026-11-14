@@ -25,6 +25,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebClient } from '@slack/web-api';
 import { approveFromThread, slackThreadReader } from '../src/autoApprove.js';
+import { approveWithProof, settleProofs } from '../src/browserProof.js';
 import { config } from '../src/config.js';
 import { pickReports, runFullCase, type FullRunDeps, type Problem, type Via } from '../src/fullRun.js';
 import { DEFAULT_TIMINGS_PATH } from '../src/pipeline.js';
@@ -185,7 +186,7 @@ const deps: FullRunDeps = {
   },
   readThread: (ts) => readThread(channel, ts),
   permalink: (ts) => slack.getPermalink(channel, ts),
-  approveFromThread: (ts) => approveFromThread({ channel, threadTs: ts, read: readThread, slack }),
+  approveFromThread: (ts) => approveFromThread({ channel, threadTs: ts, read: readThread, slack, approve: approveWithProof({ slack, log }) }),
   async pullMerged(prUrl) {
     const n = /\/pull\/(\d+)/.exec(prUrl)?.[1] ?? '';
     const r = await spawnTool('gh', ['pr', 'view', n, '--repo', repo, '--json', 'state,mergedAt'], { timeoutMs: 60_000 });
@@ -229,6 +230,8 @@ try {
     await tool.warmed;
     await tool.stop();
   }
+  // The after-fix browser proof runs in the background in this process when this script approved.
+  await settleProofs(90_000);
   if (toolProcess) {
     const gone = await stopTree(toolProcess.pid);
     log(`stopped the tool's process tree (pid ${toolProcess.pid}): ${gone ? 'gone' : 'STILL RUNNING'}`);

@@ -3,7 +3,8 @@
 // reaches the threshold, one group at a time, and handles the "Approve fix" button.
 import { App, LogLevel } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
-import { handleApprovePress, type ApprovePress, type ApproveResult } from './approve.js';
+import { type ApprovePress, type ApproveResult } from './approve.js';
+import { approveWithProof, withReproduction } from './browserProof.js';
 import { config } from './config.js';
 import { ensureDeps, unlinkDeps } from './deps.js';
 import { readEnv } from './env.js';
@@ -88,8 +89,9 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
 
   const slack = webSlackPort(client);
   const lookupSlackUser = slackLookup(env.slackBotToken);
+  const proof = { slack, log }; // browser proof (browserProof.ts): reproduction beside investigate, page checked after a merge
   const queue = new PipelineQueue((group, patternSeconds) =>
-    runPipeline(group, { code: codeSteps, slack, patternSeconds, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
+    runPipeline(group, { code: withReproduction(codeSteps, proof), slack, patternSeconds, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
   );
 
   const onMessage = makeMessageHandler({
@@ -99,7 +101,7 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
     enqueue: (group, patternSeconds) => queue.enqueue(group, patternSeconds),
     log,
   });
-  const onApprove = (press: ApprovePress) => handleApprovePress(press, { slack });
+  const onApprove = (press: ApprovePress) => approveWithProof(proof)(press, { slack });
 
   let app: App | undefined;
   if (opts.listen !== false) {
