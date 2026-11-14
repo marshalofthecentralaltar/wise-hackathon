@@ -3,6 +3,7 @@
 // Slack token and no CLAUDE* variable reaches the child.
 import { tmpdir } from 'node:os';
 import { run, parseClaudeJson, runModel } from '../fix.js';
+import { consoleRetryLog, ghFailureIsTransient, realSleep, withGithubRetry, type RetryLog, type Sleep } from './retry.js';
 
 export interface ExecResult {
   code: number | null;
@@ -22,16 +23,43 @@ export async function spawnTool(cmd: string, args: string[], opts: { input?: str
 
 export class GhError extends Error {}
 
+export interface GhApiDeps {
+  runGh: (args: string[], timeoutMs: number) => Promise<ExecResult>;
+  sleep: Sleep;
+  log: RetryLog;
+}
+
+const realGhApiDeps: GhApiDeps = {
+  runGh: (args, timeoutMs) => spawnTool('gh', args, { timeoutMs }),
+  sleep: realSleep,
+  log: consoleRetryLog,
+};
+
 /** `gh api <path>` parsed as JSON. Throws GhError with gh's own message on failure. */
 export async function ghApi<T = unknown>(path: string, timeoutMs = 30_000): Promise<T> {
-  // spawnTool passes args without a shell, so a leading / is never rewritten by Git Bash.
-  const r = await spawnTool('gh', ['api', '-H', 'Accept: application/vnd.github+json', path], { timeoutMs });
-  if (r.code !== 0) throw new GhError(`gh api ${path} failed (${r.timedOut ? 'timed out' : `exit ${r.code}`}): ${(r.stderr || r.stdout).trim().slice(0, 300)}`);
-  try {
-    return JSON.parse(r.stdout) as T;
-  } catch {
-    throw new GhError(`gh api ${path} did not return JSON`);
-  }
+  return ghApiWith<T>(path, timeoutMs, realGhApiDeps);
+}
+
+/** ghApi with its gh runner and pause injected. A network or server failure is tried again (retry.ts). */
+export async function ghApiWith<T = unknown>(path: string, timeoutMs: number, deps: GhApiDeps): Promise<T> {
+  return withGithubRetry<T>(
+    path,
+    async () => {
+      // spawnTool passes args without a shell, so a leading / is never rewritten by Git Bash.
+      const r = await deps.runGh(['api', '-H', 'Accept: application/vnd.github+json', path], timeoutMs);
+      if (r.code !== 0) {
+        const said = (r.stderr || r.stdout).trim();
+        const how = r.timedOut ? 'timed out' : `exit ${r.code}`;
+        return { ok: false, error: new GhError(`gh api ${path} failed (${how}): ${said.slice(0, 300)}`), retry: ghFailureIsTransient(said, r.timedOut), reason: `${how}: ${said}` };
+      }
+      try {
+        return { ok: true, value: JSON.parse(r.stdout) as T };
+      } catch {
+        return { ok: false, error: new GhError(`gh api ${path} did not return JSON`), retry: false, reason: 'not JSON' };
+      }
+    },
+    deps,
+  );
 }
 
 export interface ClaudeAnswer {
