@@ -75,6 +75,17 @@
     "page": "transfers",
     "lang": "en",
     "userAgent": "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36",
-    "text": "A transfer of 80.00 EUR shows as 8.00 EUR in my transfers list. In case you need to check it is me: I live at Tamme tänav 12, Tartu, born 03.05.1988. Peeter Lõhmus"
+    "text": "A transfer of 80.00 EUR shows as 8.00 EUR in my transfers list. In case you need to check it is me: I live at Tamme tänav 12, born 03.05.1988. Peeter Lõhmus"
+  },
+  {
+    "problem": "amount",
+    "name": "Mari Kask",
+    "email": "mari.kask@example.com",
+    "phone": "",
+    "customerNumber": "",
+    "page": "transfers",
+    "lang": "en",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "text": "My transfers page shows the 1,200.00 EUR I paid for rent as 1,20.00 EUR. Is that the amount that actually left my account?"
   }
 ]
