@@ -178,7 +178,7 @@ It prints one line per thing that is ready and ends with `ready in ... s`. Measu
 npm run reset
 ```
 
-It closes the tool's pull requests, deletes its branches, moves the card app's `main` back to the planted state (commit `ee38468`) only when every commit ahead of it is the tool's own, waits for the redeploy, and clears the tool's report groups (the running tool notices and starts fresh). If a person pushed to the card app, the reset refuses and names the commit and its author: nobody pushes to the card app.
+It closes the tool's pull requests, deletes its branches, moves the card app's `main` back to the planted state (commit `bd6fd24`: the card app in its new look, with both problems in it) only when every commit ahead of it is the tool's own, waits for the redeploy, and clears the tool's report groups (the running tool notices and starts fresh). If a person pushed to the card app, the reset refuses and names the commit and its author: nobody pushes to the card app.
 
 **Stop** everything (a few seconds, guess):
 
