@@ -31,6 +31,7 @@ What is open on the demo laptop before we walk on:
    1. The card page at `[CARD PAGE ADDRESS]`.
    2. Prometheus's query page with two graphs: the tool's own query (5xx on `/card` in the last hour; "Empty query result" means there are none) and, under it, `/card` traffic by status, so the jury sees the 200s and no 5xx. Open it with:
       `http://localhost:9090/query?g0.expr=sum(rate(http_requests_total%7Bpath%3D%22%2Fcard%22%2Cstatus%3D~%225..%22%7D%5B1h%5D))&g0.tab=graph&g0.range_input=15m&g1.expr=sum%20by%20(status)%20(rate(http_requests_total%7Bpath%3D%22%2Fcard%22%7D%5B1m%5D))&g1.tab=graph&g1.range_input=15m`
+      Optional, new on 14 November: Grafana in place of this tab, at `http://localhost:3100/d/card-and-transfers/card-and-transfers`. It is the real Grafana on the same Prometheus: `/card` traffic by status and the tool's 5xx query as a flat line at 0, in the screen Wise engineers know. `docs/STAGE-SETUP.md` section 9 says how to start and stop it. If it is not running, use the Prometheus address above.
    3. The card app's repository at `[REPOSITORY ADDRESS]`.
 3. A second Slack window, behind the first, on the finished high-severity thread. Zoom 150%.
 4. A small terminal at the bottom of the screen, showing the tool's log. Font large enough to read from the back of the room.
