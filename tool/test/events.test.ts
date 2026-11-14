@@ -237,12 +237,14 @@ describe('events file: the writer never changes a run (metamorphic)', () => {
         const other = await runWay(way, c);
         expect(shape(other.result), way).toEqual(shape(base.result));
         expect(calls(other.slack), way).toEqual(calls(base.slack));
-        const writerLogs = other.logs.filter((l) => l.startsWith('[events]'));
-        const emitLogs = other.logs.filter((l) => l.includes('could not emit'));
-        expect(writerLogs, way).toHaveLength(way === 'unwritable' ? 1 : 0);
-        // The pipeline's guard logs a throwing emit once. (The working writer is not held to 0 here, so the
-        // mutation "the writer throws synchronously" is judged on the result and Slack calls alone.)
-        if (way !== 'writer') expect(emitLogs, way).toHaveLength(way === 'throws' ? 1 : 0);
+      }
+    });
+
+    it(`${name}: a failed write is logged once by the writer, a throwing emit once by the pipeline`, async () => {
+      for (const way of ['writer', 'unwritable', 'throws'] as const) {
+        const { logs } = await runWay(way, c);
+        expect(logs.filter((l) => l.startsWith('[events]')), way).toHaveLength(way === 'unwritable' ? 1 : 0);
+        expect(logs.filter((l) => l.includes('could not emit')), way).toHaveLength(way === 'throws' ? 1 : 0);
       }
     });
   }
