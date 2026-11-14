@@ -339,7 +339,8 @@ export function withReproduction(code: CodeSteps, deps: ProofDeps): CodeSteps {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** After a merge: wait for the redeploy, check the page until it is fixed or the window ends, post one line. */
-async function proveFixed(press: ApprovePress, groupId: string, deps: ProofDeps): Promise<void> {
+/** `before` is read before the approval handler ran: a redeploy can land before the handler returns. */
+async function proveFixed(press: ApprovePress, groupId: string, deps: ProofDeps, atPress: { t0: number; deployed: string | null }): Promise<void> {
   const log = logger(deps);
   const statePath = deps.statePath ?? DEFAULT_REPRODUCTIONS_PATH;
   const records = Object.values(readRecords(statePath));
@@ -359,7 +360,7 @@ async function proveFixed(press: ApprovePress, groupId: string, deps: ProofDeps)
   const poll = deps.pollMs ?? 1_000;
   const deployDir = deps.deployDir ?? DEFAULT_DEPLOY_DIR;
   const baseUrl = deps.baseUrl ?? config.appBaseUrl.replace(/\/$/, '');
-  const t0 = performance.now();
+  const t0 = atPress.t0;
   const left = () => window - (performance.now() - t0);
   const say = async (text: string) => {
     try {
@@ -370,7 +371,7 @@ async function proveFixed(press: ApprovePress, groupId: string, deps: ProofDeps)
   };
 
   // The redeploy: the watcher writes .deployed.json when the new commit runs. No file: no watcher, check at once.
-  const deployedAtMerge = readDeployed(deployDir)?.commit ?? null;
+  const deployedAtMerge = atPress.deployed;
   safeEmit(deps, { groupId, step: 'deploy', state: 'start' });
   let deploySeen = deployedAtMerge === null;
   while (!deploySeen && left() > 0) {
@@ -388,7 +389,7 @@ async function proveFixed(press: ApprovePress, groupId: string, deps: ProofDeps)
     step: 'deploy',
     state: 'done',
     seconds: round1(performance.now() - t0),
-    evidence: { commit: readDeployed(deployDir)?.commit ?? null, watcher: deployedAtMerge !== null },
+    evidence: { sha: readDeployed(deployDir)?.commit ?? null, seconds: round1(performance.now() - t0), watcher: deployedAtMerge !== null },
   });
 
   safeEmit(deps, { groupId, step: 'proof', state: 'start', evidence: { check: check.name } });
@@ -435,11 +436,27 @@ export function approveWithProof(deps: ProofDeps): (press: ApprovePress, approve
   const approve = deps.approve ?? handleApprovePress;
   if (!proofEnabled(deps)) return approve;
   return async (press, approveDeps) => {
+    // The deployed commit and the clock before the press is handled: the merge, the message update and
+    // the pull request comment take 4 to 7 s, and a redeploy can land in that time.
+    const t0 = performance.now();
+    let deployed: string | null = null;
+    try {
+      deployed = readDeployed(deps.deployDir ?? DEFAULT_DEPLOY_DIR)?.commit ?? null;
+    } catch (err) {
+      logger(deps)(`[proof] could not read the deployment file before the press: ${String(err)}`);
+    }
     const result = await approve(press, approveDeps);
     try {
-      const groupId = parseApproveValue(press.value)?.group ?? '';
-      safeEmit(deps, { groupId, step: 'approval', state: result === 'merged' ? 'done' : 'failed', evidence: { result } });
-      if (result === 'merged' && groupId) track(proveFixed(press, groupId, deps), deps, `the after-fix proof for ${groupId}`);
+      const value = parseApproveValue(press.value);
+      const groupId = value?.group ?? '';
+      safeEmit(deps, {
+        groupId,
+        step: 'approval',
+        state: result === 'merged' ? 'done' : 'failed',
+        seconds: round1(performance.now() - t0),
+        evidence: { by: press.unattended ? 'rehearsal-script' : 'owner', prNumber: value?.pr ?? null, result },
+      });
+      if (result === 'merged' && groupId) track(proveFixed(press, groupId, deps, { t0, deployed }), deps, `the after-fix proof for ${groupId}`);
     } catch (err) {
       logger(deps)(`[proof] the after-fix proof did not start: ${err instanceof Error ? err.message : String(err)}`);
     }

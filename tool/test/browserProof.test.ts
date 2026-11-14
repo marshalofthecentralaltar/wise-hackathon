@@ -314,6 +314,38 @@ describe('the after-fix proof', () => {
     );
   });
 
+  it('a redeploy that lands before the approval handler returns is still seen, and the events carry the contract fields', async () => {
+    const slack = new FakeSlack();
+    const deployFile = (d: ProofDeps) => join(d.deployDir!, '.deployed.json');
+    const d = proofDeps(slack, { proofWindowMs: 5_000, runCheck: async (_f, e) => (e === 'replaced' ? FLICKER_REPRODUCED : FLICKER_STABLE) });
+    writeFileSync(deployFile(d), JSON.stringify({ commit: 'aaaaaaa', at: 'x' }));
+    await withReproduction(steps(), d).investigate({ group: group('g-fast'), owner: OWNER, monitoring: MONITORING, commits: [] });
+    await settleProofs(5_000);
+    const { p, approveDeps } = press('g-fast', slack);
+    // The real handler merges; the watcher redeploys before the handler has returned.
+    d.approve = async (pr, ad) => {
+      const r = await handleApprovePress(pr, ad);
+      writeFileSync(deployFile(d), JSON.stringify({ commit: 'ccccccc', at: 'y' }));
+      return r;
+    };
+    expect(await approveWithProof(d)({ ...p, unattended: true }, approveDeps)).toBe('merged');
+    await settleProofs(10_000);
+    expect(texts(slack).at(-1)).toBe('Deployed. Checked the card page in a browser: the card picture was not replaced in 5 seconds (before the fix: replaced 5 times).');
+    const ev = (step: string, state: string) => d.events.find((e) => e.step === step && e.state === state)!;
+    expect(ev('approval', 'done').evidence).toEqual({ by: 'rehearsal-script', prNumber: FIX_PR.prNumber, result: 'merged' });
+    expect(ev('deploy', 'done').evidence).toMatchObject({ sha: 'ccccccc', seconds: expect.any(Number) });
+    expect(ev('proof', 'done').evidence).toMatchObject({ check: 'check-flicker.mjs', before: FLICKER_REPRODUCED.result, after: FLICKER_STABLE.result, pass: true, summary: expect.stringMatching(/^Deployed\./) });
+  });
+
+  it('a person pressing is recorded as the owner', async () => {
+    const slack = new FakeSlack();
+    const d = proofDeps(slack, { proofWindowMs: 200, runCheck: async () => FLICKER_STABLE });
+    const { p, approveDeps } = press('g-person', slack);
+    await approveWithProof(d)(p, approveDeps);
+    await settleProofs(5_000);
+    expect(d.events.find((e) => e.step === 'approval')!.evidence).toEqual({ by: 'owner', prNumber: FIX_PR.prNumber, result: 'merged' });
+  });
+
   it('a restarted tool reuses group ids: the press reads the record of its own thread', async () => {
     const slack = new FakeSlack();
     const counts = [5, 3];
