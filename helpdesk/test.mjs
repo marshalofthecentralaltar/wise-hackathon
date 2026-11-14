@@ -235,3 +235,74 @@ test('the secrets file is found the same way as the tool finds it', () => {
   assert.equal(secretsFile({ WISE_BUILD_DIR: '/b' }), resolve('/b', 'secrets.env'));
   assert.deepEqual(parseSecrets('# c\nSLACK_TEST_BOT_TOKEN=xoxb-1\nEMPTY=\n'), { SLACK_TEST_BOT_TOKEN: 'xoxb-1', EMPTY: '' });
 });
+
+// ---- Windows: finding claude.exe ---------------------------------------------------------------
+
+test('on Windows the real claude.exe is used, not the .cmd shim', async () => {
+  const { claudeLauncher } = await import('./lib/claude.mjs');
+  const env = { APPDATA: 'C:\\Users\\u\\AppData\\Roaming', USERPROFILE: 'C:\\Users\\u' };
+  assert.equal(claudeLauncher({ platform: 'win32', env, where: () => ['C:\\x\\claude.exe'] }).cmd, 'C:\\x\\claude.exe');
+  const npmExe = 'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe';
+  assert.equal(claudeLauncher({ platform: 'win32', env, where: () => ['C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd'], exists: (p) => p === npmExe }).cmd, npmExe);
+  // Anthropic's own installer, not on PATH for where.
+  const native = 'C:\\Users\\u\\.local\\bin\\claude.exe';
+  assert.equal(claudeLauncher({ platform: 'win32', env, where: () => [], exists: (p) => p === native }).cmd, native);
+  assert.equal(claudeLauncher({ platform: 'win32', env, where: () => [], exists: () => false }).cmd, 'claude.exe');
+  assert.equal(claudeLauncher({ platform: 'darwin', env: {} }).cmd, 'claude');
+  const js = claudeLauncher({ env: { CLAUDE_BIN_PATH_FOR_TOOL: 'C:\\t\\fake.mjs' } });
+  assert.deepEqual([js.cmd, js.prefix], [process.execPath, ['C:\\t\\fake.mjs']]);
+});
+
+// ---- the whole server, with a stand-in claude, on any system --------------------------------------
+
+test('the server takes a ticket from the form endpoint to a PII-safe Slack text', { timeout: 30_000 }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const state = mkdtempSync(join(tmpdir(), 'helpdesk-test-'));
+  const child = spawn(process.execPath, [join(here, 'serve.mjs'), '--dry-run', '--port', '0'], {
+    env: { ...process.env, HELPDESK_STATE_DIR: state, CLAUDE_BIN_PATH_FOR_TOOL: join(here, 'test-fake-claude.mjs'), WISE_SECRETS_FILE: join(state, 'none.env') },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    let out = '';
+    const port = await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error(`server did not start: ${out}`)), 10_000);
+      child.stdout.on('data', (d) => {
+        out += d;
+        const m = /listening on port (\d+)/.exec(out);
+        if (m) (clearTimeout(t), resolve(Number(m[1])));
+      });
+      child.on('exit', (c) => reject(new Error(`server exited ${c}: ${out}`)));
+    });
+    const base = `http://127.0.0.1:${port}`;
+    const png = readFileSync(join(here, 'seed-screenshots', 'flicker.png')).toString('base64');
+    const res = await fetch(`${base}/api/tickets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0 Safari/537.36' },
+      body: JSON.stringify({ ...F, page: 'card', text: 'Kirjutas Kase Mari: the card picture blinks. Mail OLIVER.BRANDT@example.com, card 4111 1111 1111 1111.', screenshot: { dataBase64: png } }),
+    });
+    assert.equal(res.status, 201);
+    const { id } = await res.json();
+    let t;
+    for (let i = 0; i < 100; i++) {
+      t = (await (await fetch(`${base}/api/inbox/tickets`)).json()).tickets.find((x) => x.id === id);
+      if (t?.status === 'Sent to #support' || t?.status === 'Held') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(t.status, 'Sent to #support', t.heldReason);
+    assert.match(t.slackText, /^Ticket T-1001, card page, Chrome on Windows, \d\d:\d\d: Kirjutas \[name\]: the card picture blinks\. Mail \[email\], card \[card number\]\. Screenshot shows: The card picture for \[name\] is almost invisible in this frame\.$/);
+    assert.equal((await fetch(`${base}${t.screenshotUrl}`)).status, 200);
+    assert.equal((await fetch(`http://localhost:${port}/inbox`)).status, 200); // ::1 or 127.0.0.1, whichever localhost is
+  } finally {
+    child.kill();
+    await new Promise((r) => child.once('exit', r));
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('claude gets no Anthropic key, no Slack token and no CLAUDE* variable', async () => {
+  const { childEnv } = await import('./lib/claude.mjs');
+  const env = childEnv({ PATH: '/bin', anthropic_api_key: 'k', SLACK_TEST_BOT_TOKEN: 't', ClaudeCode: '1', CLAUDE_BIN_PATH_FOR_TOOL: 'x', APPDATA: 'a' });
+  assert.deepEqual(env, { PATH: '/bin', APPDATA: 'a' });
+});
