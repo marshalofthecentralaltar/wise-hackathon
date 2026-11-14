@@ -271,7 +271,7 @@ server.on('error', (err) => {
 });
 
 function startServer() {
-  server.listen(port, () => {
+  server.listen(port, '127.0.0.1', () => {
     console.log(`[trace] ${mode} ${displayPath}`);
     console.log(`[trace] process screen on http://localhost:${port}`);
   });

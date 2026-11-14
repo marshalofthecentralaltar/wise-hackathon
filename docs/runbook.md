@@ -34,6 +34,7 @@ What is open on the demo laptop before we walk on:
    3. The card app's repository at `[REPOSITORY ADDRESS]`.
 3. A second Slack window, behind the first, on the finished high-severity thread. Zoom 150%.
 4. A small terminal at the bottom of the screen, showing the tool's log. Font large enough to read from the back of the room.
+   Optional, new on 14 November: instead of the terminal, the process screen (`node trace\serve.mjs`, then `http://localhost:3300`) in a browser window under the three tabs. It shows each step starting and finishing with its evidence: the Prometheus query, the commits weighed, the commit named, the verdict, the diff. The demo is whole without it. `docs/STAGE-SETUP.md` section 9 says how to start and stop it.
 
 New on 14 November, both in the first Slack thread, so nothing new has to be opened:
 
