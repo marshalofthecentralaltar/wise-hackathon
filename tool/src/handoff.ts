@@ -3,6 +3,7 @@
 // request exists. This is the only message of a run that names or tags the owner.
 import { config } from './config.js';
 import { askClaude } from './steps/exec.js';
+import { grafanaLink } from './grafana.js';
 import type { Handoff, Investigation, ReportGroup } from './types.js';
 import type { SlackBlock } from './slackPost.js';
 
@@ -109,6 +110,7 @@ function fixPart(h: Handoff): string {
 /** Builds the handoff. Pure: no Slack or model call. */
 export function buildHandoffMessage(h: Handoff): HandoffMessage {
   const { group, monitoring, verdict } = h;
+  const grafana = grafanaLink(group);
   const reportLinks = group.reports.map((r, i) => (r.permalink ? link(r.permalink, String(i + 1)) : String(i + 1)));
   const n = group.reports.length;
   const parts: HandoffPart[] = [
@@ -117,7 +119,7 @@ export function buildHandoffMessage(h: Handoff): HandoffMessage {
       text: `*Problem:* ${sentence(esc(group.summary))} *Severity: ${verdict.severity}.* ${sentence(esc(verdict.reason))}`,
     },
     { id: 'reports', text: `*Reports:* ${n} ${n === 1 ? 'message' : 'messages'} in #${config.supportChannel}: ${reportLinks.join(', ')}.` },
-    { id: 'monitoring', text: `*Monitoring and logs:* ${sentence(esc(monitoring.summary)) || 'nothing.'}` },
+    { id: 'monitoring', text: `*Monitoring and logs:* ${sentence(esc(monitoring.summary)) || 'nothing.'}${grafana ? ` ${grafana}` : ''}` },
     { id: 'origin', text: originPart(h.investigation) },
     { id: 'code', text: codePart(h.investigation) },
     { id: 'next', text: nextPart(h) },
