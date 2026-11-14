@@ -337,6 +337,16 @@ describe('the after-fix proof', () => {
     expect(ev('proof', 'done').evidence).toMatchObject({ check: 'check-flicker.mjs', before: FLICKER_REPRODUCED.result, after: FLICKER_STABLE.result, pass: true, summary: expect.stringMatching(/^Deployed\./) });
   });
 
+  it('a merge that fails emits approval failed with the contract fields', async () => {
+    const slack = new FakeSlack();
+    const d = proofDeps(slack, { approve: async () => 'merge-failed' });
+    const { p, approveDeps } = press('g-mfail', slack);
+    expect(await approveWithProof(d)(p, approveDeps)).toBe('merge-failed');
+    await settleProofs(5_000);
+    expect(d.events.map((e) => `${e.step}:${e.state}`)).toEqual(['approval:failed']);
+    expect(d.events[0]!.evidence).toEqual({ by: 'owner', prNumber: FIX_PR.prNumber, result: 'merge-failed' });
+  });
+
   it('a person pressing is recorded as the owner', async () => {
     const slack = new FakeSlack();
     const d = proofDeps(slack, { proofWindowMs: 200, runCheck: async () => FLICKER_STABLE });
@@ -374,6 +384,8 @@ describe('the after-fix proof', () => {
     expect(await approveWithProof(d)({ ...p, userId: 'U0SOMEONE' }, approveDeps)).toBe('not-owner');
     await settleProofs(5_000);
     expect(calls).toBe(0);
+    // A refused press is not the owner's approval: no event at all.
+    expect(d.events).toEqual([]);
   });
 });
 

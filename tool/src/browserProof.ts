@@ -449,7 +449,9 @@ export function approveWithProof(deps: ProofDeps): (press: ApprovePress, approve
     try {
       const value = parseApproveValue(press.value);
       const groupId = value?.group ?? '';
-      safeEmit(deps, {
+      // Only a press that reached the merge is an approval step; a refused press (not the owner,
+      // already approved, in progress, bad value) is not the owner's approval and emits nothing.
+      if (result === 'merged' || result === 'merge-failed') safeEmit(deps, {
         groupId,
         step: 'approval',
         state: result === 'merged' ? 'done' : 'failed',
