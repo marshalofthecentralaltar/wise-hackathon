@@ -11,6 +11,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
+import type { ToolEvent } from './events.js';
 import { buildHandoffMessage, draftCustomerSentence, esc, finalCustomerSentence } from './handoff.js';
 import type { SlackPort } from './slackPost.js';
 import { listRecentChanges as defaultListRecentChanges } from './steps/changes.js';
@@ -51,6 +52,8 @@ export interface PipelineDeps {
   /** null writes no file. */
   timingsPath?: string | null;
   log?: (line: string) => void;
+  /** One line per step start and finish for the events file (src/events.ts); absent writes no file. Never awaited. */
+  emit?: (e: ToolEvent) => void;
 }
 
 export type PipelineStep = 'permalinks' | 'monitoring' | 'changes' | 'owner' | 'investigation' | 'verdict' | 'fix' | 'handoff' | 'post';
@@ -116,6 +119,55 @@ export function ownerStrings(owner: Pick<Owner, 'githubLogin' | 'slackUserId'>):
 
 const scrub = (text: string, secrets: string[]) => secrets.reduce((t, s) => (s ? t.split(s).join('the owner') : t), text);
 
+/** A Slack ts ("1763050000.000100") as an ISO time, or null when it is not one. */
+export function slackTsToIso(ts: string): string | null {
+  const d = new Date(Number(ts) * 1000);
+  return ts && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+}
+
+type EventStep = Exclude<PipelineStep, 'permalinks' | 'post'>;
+
+/** The evidence of each step's `done` line: the fields of issue #20's contract, picked one by one. */
+const EVIDENCE = {
+  monitoring: (m: MonitoringFinding) => ({
+    source: m.source,
+    query: m.query ?? null,
+    errorsPerSecond: m.errorsPerSecond,
+    errorCount5xx: m.errorCount5xx ?? null,
+    alertsFiring: m.alertsFiring,
+    p95Seconds: m.p95Seconds,
+    logLinesRead: m.logLinesRead,
+    logErrors: m.logErrors,
+    showsProblem: m.showsProblem,
+    summary: m.summary,
+  }),
+  changes: (commits: RecentCommit[]) => ({
+    days: config.recentDays,
+    commits: commits.map((c) => ({ sha: c.sha, author: c.author, mergedAt: c.mergedAt, message: c.message, files: c.files })),
+  }),
+  owner: (o: Owner) => ({ codePath: o.codePath, ownersLine: o.ownersLine }),
+  investigation: (i: Investigation) => ({
+    found: i.found,
+    commitSha: i.commitSha,
+    commitAuthor: i.commitAuthor,
+    file: i.file,
+    lines: i.lines,
+    whatIsWrong: i.whatIsWrong,
+    customerEffect: i.customerEffect,
+    revertsCleanly: i.revertsCleanly,
+  }),
+  verdict: (v: Verdict) => ({ severity: v.severity, reason: v.reason, decidedBy: v.decidedBy }),
+  fix: (f: FixOutcome) => ({
+    kind: f.kind,
+    prUrl: f.prUrl,
+    prNumber: f.prNumber,
+    filesChanged: f.filesChanged,
+    testsPassed: f.testsPassed,
+    note: f.note,
+    diff: f.diff ?? null,
+  }),
+};
+
 export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promise<PipelineResult> {
   const log = deps.log ?? ((m: string) => console.error(m));
   const startedAt = new Date().toISOString();
@@ -126,6 +178,41 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
   const threadTs = group.threadTs;
   let ownerSecrets: string[] = [];
   let monitoringSource: RunTimings['monitoringSource'];
+
+  // The events file. Every emit is guarded here, evidence building included: a writer or an
+  // evidence field that throws must not change the run.
+  const eventGroupId = `${group.id}@${startedAt}`;
+  let eventSecrets: string[] = [];
+  let emitWarned = false;
+  const emitEvent = (step: string, state: ToolEvent['state'], extra?: () => Partial<ToolEvent>): void => {
+    if (!deps.emit) return;
+    try {
+      deps.emit({ v: 1, at: new Date().toISOString(), groupId: eventGroupId, step, state, ...(extra ? extra() : {}) });
+    } catch (err) {
+      if (!emitWarned) log(`[pipeline ${group.id}] could not emit a ${step} event: ${String(err)}`);
+      emitWarned = true;
+    }
+  };
+  /** timed(), with a start line before and a done or failed line after. */
+  const traced = async <T>(step: EventStep, fn: () => Promise<T>, evidence: (v: T) => unknown): Promise<T> => {
+    emitEvent(step, 'start');
+    try {
+      const value = await timed(step, secs, fn);
+      emitEvent(step, 'done', () => ({ seconds: secs[step], evidence: evidence(value) }));
+      return value;
+    } catch (err) {
+      emitEvent(step, 'failed', () => ({
+        seconds: secs[step],
+        error: scrub(err instanceof Error ? err.message : String(err), [...ownerSecrets, ...eventSecrets]).slice(0, 2000),
+      }));
+      throw err;
+    }
+  };
+
+  emitEvent('reports', 'done', () => ({
+    ...(deps.patternSeconds !== undefined ? { seconds: round(deps.patternSeconds) } : {}),
+    evidence: { page: group.page, summary: group.summary, reports: group.reports.map((r) => ({ at: slackTsToIso(r.ts), text: r.text })) },
+  }));
 
   const say = async (text: string): Promise<void> => {
     try {
@@ -188,9 +275,12 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
 
     // Steps 3, 4 and 5 do not depend on each other.
     const [monitoring, commits, owner] = await Promise.all([
-      timed('monitoring', secs, () => (deps.checkMonitoring ?? defaultCheckMonitoring)(group.page)),
-      timed('changes', secs, () => (deps.listRecentChanges ?? (() => defaultListRecentChanges()))()),
-      timed('owner', secs, () => (deps.findOwner ?? defaultFindOwner)(group.page)),
+      traced('monitoring', () => (deps.checkMonitoring ?? defaultCheckMonitoring)(group.page), EVIDENCE.monitoring),
+      traced('changes', () => (deps.listRecentChanges ?? (() => defaultListRecentChanges()))(), EVIDENCE.changes),
+      traced('owner', () => (deps.findOwner ?? defaultFindOwner)(group.page), (o) => {
+        eventSecrets = ownerStrings(o);
+        return EVIDENCE.owner(o);
+      }),
     ]);
     ownerSecrets = ownerStrings(owner);
     monitoringSource = monitoring.source;
@@ -203,14 +293,14 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
     // Step 6, with the text-only classification for step 7 started beside it.
     const textEffect = deps.code.classifyCustomerEffect(group.reports.map((r) => r.text));
     textEffect.catch(() => undefined); // judge reads it; this only keeps a rejection from going unhandled
-    const investigation: Investigation = await timed('investigation', secs, () => deps.code.investigate({ group, owner, monitoring, commits }));
+    const investigation: Investigation = await traced('investigation', () => deps.code.investigate({ group, owner, monitoring, commits }), EVIDENCE.investigation);
     await say(
       investigation.found && investigation.commitSha
         ? `The investigation named commit ${investigation.commitSha.slice(0, 7)}. Judging severity.`
         : 'The investigation could not name a commit. Judging severity.',
     );
 
-    const verdict: Verdict = await timed('verdict', secs, () => deps.code.judge({ group, monitoring, investigation, textEffect }));
+    const verdict: Verdict = await traced('verdict', () => deps.code.judge({ group, monitoring, investigation, textEffect }), EVIDENCE.verdict);
     await say(
       verdict.severity === 'low'
         ? 'Severity: low. Writing the smallest fix.'
@@ -219,7 +309,7 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
 
     let fix: FixOutcome;
     try {
-      fix = await timed('fix', secs, () => deps.code.fix({ group, owner, investigation, verdict }));
+      fix = await traced('fix', () => deps.code.fix({ group, owner, investigation, verdict }), EVIDENCE.fix);
     } catch (err) {
       // The handoff still matters without a pull request, so a failed fix does not stop the run.
       const message = scrub(err instanceof Error ? err.message : String(err), ownerSecrets);
@@ -228,14 +318,14 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
       fix = { kind: 'none', prUrl: null, prNumber: null, branch: null, filesChanged: [], testsPassed: null, note: `the fix step failed: ${message.slice(0, 200)}`, seconds: secs.fix ?? 0 };
     }
 
-    const handoff = await timed('handoff', secs, async () => {
+    const handoff = await traced('handoff', async () => {
       // What part 8 must not say, known only now: the owner, the commit, its author and the file.
       const fileName = investigation.file?.split('/').at(-1) ?? '';
       const forbidden = [...ownerStrings(owner), investigation.commitSha?.slice(0, 7) ?? '', investigation.commitAuthor ?? '', investigation.file ?? '', fileName].filter(Boolean);
       const sentenceForCustomers = finalCustomerSentence(await draft, group, forbidden, log);
       const h: Handoff = { group, monitoring, owner, investigation, verdict, fix, sentenceForCustomers };
       return { h, message: buildHandoffMessage(h) };
-    });
+    }, (v) => ({ sentenceForCustomers: v.h.sentenceForCustomers, threadUrl: group.reports[0]?.permalink ?? null }));
 
     const posted = await timed('post', secs, () =>
       deps.slack.postMessage({ channel, threadTs, text: handoff.message.text, blocks: handoff.message.blocks }),

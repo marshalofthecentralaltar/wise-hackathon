@@ -3,13 +3,15 @@
 // reaches the threshold, one group at a time, and handles the "Approve fix" button.
 import { App, LogLevel } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
-import { handleApprovePress, type ApprovePress, type ApproveResult } from './approve.js';
+import { type ApprovePress, type ApproveResult } from './approve.js';
+import { approveWithProof, withReproduction } from './browserProof.js';
 import { config } from './config.js';
 import { ensureDeps, unlinkDeps } from './deps.js';
 import { readEnv } from './env.js';
 import { fixStep } from './fixStep.js';
 import { APPROVE_ACTION_ID } from './handoff.js';
 import { investigate } from './investigate.js';
+import { makeRunEvents } from './events.js';
 import { makeMessageHandler } from './listener.js';
 import { PipelineQueue, runPipeline } from './pipeline.js';
 import type { OwnIdentity, SlackMessageEvent } from './slack.js';
@@ -88,8 +90,10 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
 
   const slack = webSlackPort(client);
   const lookupSlackUser = slackLookup(env.slackBotToken);
+  const events = makeRunEvents(); // the events file (events.ts): the pipeline and the browser proof write one run id
+  const proof = { slack, log, emit: events.emitBare }; // browser proof (browserProof.ts): reproduction beside investigate, page checked after a merge
   const queue = new PipelineQueue((group, patternSeconds) =>
-    runPipeline(group, { code: codeSteps, slack, patternSeconds, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
+    runPipeline(group, { code: withReproduction(codeSteps, proof), slack, patternSeconds, emit: events.emit, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
   );
 
   const onMessage = makeMessageHandler({
@@ -99,7 +103,7 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
     enqueue: (group, patternSeconds) => queue.enqueue(group, patternSeconds),
     log,
   });
-  const onApprove = (press: ApprovePress) => handleApprovePress(press, { slack });
+  const onApprove = (press: ApprovePress) => approveWithProof(proof)(press, { slack });
 
   let app: App | undefined;
   if (opts.listen !== false) {
