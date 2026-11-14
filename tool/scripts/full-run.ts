@@ -27,6 +27,7 @@ import { WebClient } from '@slack/web-api';
 import { approveFromThread, slackThreadReader } from '../src/autoApprove.js';
 import { approveWithProof, settleProofs } from '../src/browserProof.js';
 import { config } from '../src/config.js';
+import { makeRunEvents } from '../src/events.js';
 import { pickReports, runFullCase, type FullRunDeps, type Problem, type Via } from '../src/fullRun.js';
 import { DEFAULT_TIMINGS_PATH } from '../src/pipeline.js';
 import { CARD_APP_REPO, DEFAULT_DEPLOY_DIR, isToolBranchName, resetTool, waitForDeployment } from '../src/reset.js';
@@ -81,6 +82,8 @@ const auth = await botClient.auth.test();
 const ownBot = { userId: auth.user_id ?? '', botId: auth.bot_id ?? '' };
 const readThread = slackThreadReader(botClient);
 const slack = webSlackPort(botClient);
+/** The approval this script makes writes its steps to the same events file as the tool. */
+const events = makeRunEvents();
 /** The sender of the fallback's events: anyone but the tool's bot. */
 const DIRECT_SENDER = 'U0SUPPORTDESK';
 
@@ -186,7 +189,7 @@ const deps: FullRunDeps = {
   },
   readThread: (ts) => readThread(channel, ts),
   permalink: (ts) => slack.getPermalink(channel, ts),
-  approveFromThread: (ts) => approveFromThread({ channel, threadTs: ts, read: readThread, slack, approve: approveWithProof({ slack, log }) }),
+  approveFromThread: (ts) => approveFromThread({ channel, threadTs: ts, read: readThread, slack, approve: approveWithProof({ slack, log, emit: events.emitBare }) }),
   async pullMerged(prUrl) {
     const n = /\/pull\/(\d+)/.exec(prUrl)?.[1] ?? '';
     const r = await spawnTool('gh', ['pr', 'view', n, '--repo', repo, '--json', 'state,mergedAt'], { timeoutMs: 60_000 });
@@ -232,6 +235,7 @@ try {
   }
   // The after-fix browser proof runs in the background in this process when this script approved.
   await settleProofs(90_000);
+  await events.idle();
   if (toolProcess) {
     const gone = await stopTree(toolProcess.pid);
     log(`stopped the tool's process tree (pid ${toolProcess.pid}): ${gone ? 'gone' : 'STILL RUNNING'}`);

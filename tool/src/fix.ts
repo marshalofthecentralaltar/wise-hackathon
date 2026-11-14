@@ -519,7 +519,7 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
     if (r.code !== 0) return fail('push', `git ${args.join(' ').slice(0, 40)} failed`, r.stderr + r.stdout, branch);
   }
   const diff = await lastCommitDiff(cwd);
-  const push =await run('git', ['push', '-q', '-u', 'origin', branch], { cwd, timeoutMs: NETWORK_TIMEOUT_MS });
+  const push = await run('git', ['push', '-q', '-u', 'origin', branch], { cwd, timeoutMs: NETWORK_TIMEOUT_MS });
   done('push', t0);
   if (push.code !== 0) return fail('push', 'git push failed', push.stderr + push.stdout, branch);
 

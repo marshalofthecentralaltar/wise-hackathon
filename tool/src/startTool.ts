@@ -11,7 +11,7 @@ import { readEnv } from './env.js';
 import { fixStep } from './fixStep.js';
 import { APPROVE_ACTION_ID } from './handoff.js';
 import { investigate } from './investigate.js';
-import { eventsPath, makeEventWriter } from './events.js';
+import { makeRunEvents } from './events.js';
 import { makeMessageHandler } from './listener.js';
 import { PipelineQueue, runPipeline } from './pipeline.js';
 import type { OwnIdentity, SlackMessageEvent } from './slack.js';
@@ -90,10 +90,10 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
 
   const slack = webSlackPort(client);
   const lookupSlackUser = slackLookup(env.slackBotToken);
-  const emit = makeEventWriter(eventsPath());
-  const proof = { slack, log }; // browser proof (browserProof.ts): reproduction beside investigate, page checked after a merge
+  const events = makeRunEvents(); // the events file (events.ts): the pipeline and the browser proof write one run id
+  const proof = { slack, log, emit: events.emitBare }; // browser proof (browserProof.ts): reproduction beside investigate, page checked after a merge
   const queue = new PipelineQueue((group, patternSeconds) =>
-    runPipeline(group, { code: withReproduction(codeSteps, proof), slack, patternSeconds, emit, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
+    runPipeline(group, { code: withReproduction(codeSteps, proof), slack, patternSeconds, emit: events.emit, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
   );
 
   const onMessage = makeMessageHandler({
