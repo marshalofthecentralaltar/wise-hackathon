@@ -91,10 +91,15 @@ works; this page uses `C:\wise-build`.
 ```
 mkdir C:\wise-build
 cd /d C:\wise-build
-git clone https://github.com/marshalofthecentralaltar/wise-hackathon.git
+git clone --branch demo-proven-2026-11-14-c https://github.com/marshalofthecentralaltar/wise-hackathon.git
 ```
 
 The repository is private: the clone works once step 2 is done with an account that can read it.
+
+`--branch demo-proven-2026-11-14-c` gets the exact build that passed the counted runs, not whatever is newest on
+`main`. If `MORNING.md` names a different tag, use that one. Git prints a note about a
+"detached HEAD": that is expected. This build and the card app's `main` belong together: never
+set the laptop up from another branch.
 
 ## 6. Install the tool's packages (about 1 minute on a new laptop, guess; 5 s measured on the build PC with its download cache full)
 
@@ -188,6 +193,24 @@ npm run demo-stop
 
 It ends with `everything is stopped`, and ports 3000 and 9090 refuse connections. Running it twice is safe.
 
+**New on 14 November: the tool checks the page in a browser itself.** While it investigates it
+writes `Reproduced in a browser: the card picture was replaced 5 times in 5 seconds.` in the
+thread. After "Approve fix" is pressed and the card app has redeployed it writes `Deployed.
+Checked the card page in a browser: the card picture was not replaced in 5 seconds (before the
+fix: replaced 5 times).` That line came 14.5 to 17.9 s after the press in 9 runs on the build PC.
+It uses Chrome or Edge, which the doctor checks. A browser that cannot start never stops a run:
+the thread says so in one line.
+
+**The tool writes what it did to a file.** Every step, with the evidence it found (the Prometheus
+query, the commits it weighed, the commit it named, the verdict, the fix's diff), goes to
+`tool\.state\events.jsonl`, one line per step start and finish. Nothing reads it unless the
+process screen is running; deleting it between rehearsals is safe.
+
+**When GitHub does not answer.** The tool tries a GitHub read three times by itself. If the thread
+still says `Stopped while listing recent changes`, or `npm run reset` stops with a connection
+error, GitHub was unreachable for several seconds: run `npm run reset` again, then send the three
+reports again. A group that stopped does not start again by itself.
+
 ## Settings a laptop may need
 
 None by hand on a laptop set up as above (measured on the build PC on 13 Nov: a fresh clone in a
@@ -200,6 +223,8 @@ created it there, then passed the type check and all 241 tests, and connected to
 | `WISE_SECRETS_FILE` | the secrets file | `<build folder>/secrets.env` |
 | `CARD_APP_DEPLOY_DIR` | the card app's running copy | `<build folder>/demo-bank-card-app-deploy` |
 | `CHECK_FLICKER` | the browser check | `tool/checks/check-flicker.mjs` |
+| `BROWSER_PROOF` | `off` switches the tool's own browser checks off: the two thread lines above disappear, everything else stays | on |
+| `WISE_EVENTS_FILE` | the file the tool writes each step and its evidence to | `tool/.state/events.jsonl` |
 | `CLAUDE_BIN_PATH_FOR_TOOL` | the Claude Code program, when the tool cannot find it | found with `where claude` |
 
 A value set in the terminal wins over the secrets file.

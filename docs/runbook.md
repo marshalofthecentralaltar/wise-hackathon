@@ -35,6 +35,12 @@ What is open on the demo laptop before we walk on:
 3. A second Slack window, behind the first, on the finished high-severity thread. Zoom 150%.
 4. A small terminal at the bottom of the screen, showing the tool's log. Font large enough to read from the back of the room.
 
+New on 14 November, both in the first Slack thread, so nothing new has to be opened:
+
+- While the tool investigates, the thread shows `Reproduced in a browser: the card picture was replaced 5 times in 5 seconds.` The wrong-amount thread names the row: `row 4: stored 2,040.00, shown 2,40.00 EUR`.
+- After the owner presses "Approve fix", the thread shows `Deployed. Checked the card page in a browser: the card picture was not replaced in 5 seconds (before the fix: replaced 5 times).` It came 14.5 to 17.9 s after the press in 9 runs on the build PC. Keep the first thread in view until it arrives, then switch to the card page.
+- The card page has a new look (green, large rounded cards). The name is still Demo Bank and both planted problems are unchanged.
+
 The 150% zoom is a starting value, not a measurement. Check it from the back of the room at the 08:15 run and write the new value here.
 
 ## 3. The three minutes
