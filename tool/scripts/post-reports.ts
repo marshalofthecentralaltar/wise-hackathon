@@ -38,6 +38,20 @@ if (problems.includes('flicker') && (process.env.SEED_SPIKE ?? '').toLowerCase()
   seeder.unref();
   console.error(`Grafana spike seeder started (pid ${seeder.pid ?? '?'}, 240 s)`);
 }
+// `both` with the helpdesk running (helpdesk/serve.mjs, port 3400): the tickets go in through its
+// form endpoint (helpdesk/seed.mjs --problem mixed), so the inbox shows them and only the PII-safe
+// text reaches #support, as on stage. Without the helpdesk: posted straight to #support below.
+if (problem === 'both') {
+  const helpdesk = (process.env.HELPDESK_URL ?? '').trim() || 'http://localhost:3400';
+  const up = await fetch(`${helpdesk}/api/inbox/tickets`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok).catch(() => false);
+  if (up) {
+    console.error(`posting through the helpdesk at ${helpdesk} (seed --problem mixed)`);
+    const seed = spawn(process.execPath, [fileURLToPath(new URL('../../helpdesk/seed.mjs', import.meta.url)), '--problem', 'mixed', '--gap-seconds', String(gapSeconds), '--url', helpdesk], { stdio: 'inherit' });
+    const code = await new Promise<number | null>((r) => seed.on('exit', r));
+    process.exit(code ?? 1);
+  }
+  console.error(`the helpdesk does not answer at ${helpdesk}: posting straight to #support`);
+}
 const texts = problems.flatMap((p) => pickReports(p));
 const posted: { ts: string; postedAt: string }[] = [];
 for (const [i, text] of texts.entries()) {
