@@ -42,7 +42,7 @@ describe('handoff parts', () => {
     const actions = m.blocks.find((b) => b.type === 'actions') as { elements: { action_id: string; value: string; text: { text: string } }[] };
     expect(actions.elements[0]!.action_id).toBe(APPROVE_ACTION_ID);
     expect(actions.elements[0]!.text.text).toBe('Approve fix');
-    expect(JSON.parse(actions.elements[0]!.value)).toEqual({ repo: 'acme/demo-app', pr: 9, owner: 'U0OWNER01', group: 'group-1' });
+    expect(JSON.parse(actions.elements[0]!.value)).toEqual({ repo: 'acme/demo-app', pr: 9, owner: 'U0OWNER01', group: 'group-1', approvers: ['U0OWNER01'] });
   });
 
   it('high severity: no part 7, no button, the other seven in order', () => {

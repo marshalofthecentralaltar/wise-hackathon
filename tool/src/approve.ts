@@ -59,7 +59,8 @@ export function parseApproveValue(value: string): ApproveValue | null {
     if (typeof v.repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(v.repo)) return null;
     if (typeof v.pr !== 'number' || !Number.isInteger(v.pr) || v.pr <= 0) return null;
     if (typeof v.owner !== 'string' || !/^[UW][A-Z0-9]+$/.test(v.owner)) return null;
-    return { repo: v.repo, pr: v.pr, owner: v.owner, group: typeof v.group === 'string' ? v.group : '' };
+    const approvers = Array.isArray(v.approvers) ? v.approvers.filter((a): a is string => typeof a === 'string' && /^[UW][A-Z0-9]+$/.test(a)) : [];
+    return { repo: v.repo, pr: v.pr, owner: v.owner, group: typeof v.group === 'string' ? v.group : '', ...(approvers.length ? { approvers } : {}) };
   } catch {
     return null;
   }
@@ -101,8 +102,8 @@ export async function handleApprovePress(press: ApprovePress, deps: ApproveDeps)
   }
   const key = keyOf(value);
   if (readApprovals(statePath)[key]) return 'already-approved';
-  if (press.userId !== value.owner) {
-    await tell('Only the owner named in this handoff can approve the fix. Nothing was merged.');
+  if (!(value.approvers ?? [value.owner]).includes(press.userId)) {
+    await tell('Only the people tagged as owner in this handoff can approve the fix. Nothing was merged.');
     return 'not-owner';
   }
   if (inFlight.has(key)) return 'in-progress';

@@ -55,6 +55,8 @@ export interface PipelineDeps {
   log?: (line: string) => void;
   /** One line per step start and finish for the events file (src/events.ts); absent writes no file. Never awaited. */
   emit?: (e: ToolEvent) => void;
+  /** Id of the monitor channel: the run opens its thread there with one top-level message. Absent: under the first report. */
+  monitorChannelId?: string;
 }
 
 export type PipelineStep = 'permalinks' | 'monitoring' | 'changes' | 'owner' | 'investigation' | 'verdict' | 'fix' | 'handoff' | 'post';
@@ -175,8 +177,8 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
   const t0 = performance.now();
   const secs: Record<string, number> = {};
   if (deps.patternSeconds !== undefined) secs.pattern = round(deps.patternSeconds);
-  const channel = group.reports[0]?.channel ?? '';
-  const threadTs = group.threadTs;
+  let channel = group.reports[0]?.channel ?? '';
+  let threadTs = group.threadTs;
   let ownerSecrets: string[] = [];
   let monitoringSource: RunTimings['monitoringSource'];
 
@@ -260,7 +262,24 @@ export async function runPipeline(group: ReportGroup, deps: PipelineDeps): Promi
       log(`[pipeline ${group.id}] customer sentence threw: ${String(err)}`);
       return null;
     });
-    await say(`${n} reports look like the same problem${group.page ? ` on the ${group.page} page` : ''}. Checking monitoring, recent changes and the owners file.`);
+    const pattern = `${n} reports look like the same problem${group.page ? ` on the ${group.page} page` : ''}`;
+    let opened = false;
+    if (deps.monitorChannelId) {
+      // The only top-level message of a run: the pattern. Everything after it goes in its thread.
+      try {
+        const top = await deps.slack.postMessage({ channel: deps.monitorChannelId, text: `*Pattern recognised:* ${pattern}: ${esc(group.summary.trim())}` });
+        if (top.ts) {
+          channel = deps.monitorChannelId;
+          threadTs = top.ts;
+          group.threadChannel = channel;
+          group.threadTs = top.ts;
+          opened = true;
+        }
+      } catch (err) {
+        log(`[pipeline ${group.id}] could not open the thread in the monitor channel, using the report's thread: ${String(err)}`);
+      }
+    }
+    await say(opened ? 'Checking monitoring, recent changes and the owners file.' : `${pattern}. Checking monitoring, recent changes and the owners file.`);
 
     // Report links for part 2. A missing link is not worth stopping for.
     await Promise.all(

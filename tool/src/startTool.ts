@@ -87,13 +87,17 @@ export async function startTool(opts: StartToolOptions = {}): Promise<RunningToo
   const channelId = await findChannelId(client, config.supportChannel);
   if (!channelId) throw new StartError(`#${config.supportChannel} not found (the bot needs channels:read)`, 1);
   await client.conversations.join({ channel: channelId });
+  const monitorOff = !config.monitorChannel || config.monitorChannel.toLowerCase() === 'off';
+  const monitorChannelId = monitorOff ? undefined : await findChannelId(client, config.monitorChannel);
+  if (monitorChannelId) await client.conversations.join({ channel: monitorChannelId });
+  else if (!monitorOff) logError(`#${config.monitorChannel} not found: the tool's threads go under the first report in #${config.supportChannel}`);
 
   const slack = webSlackPort(client);
   const lookupSlackUser = slackLookup(env.slackBotToken);
   const events = makeRunEvents(); // the events file (events.ts): the pipeline and the browser proof write one run id
   const proof = { slack, log, emit: events.emitBare }; // browser proof (browserProof.ts): reproduction beside investigate, page checked after a merge
   const queue = new PipelineQueue((group, patternSeconds) =>
-    runPipeline(group, { code: withReproduction(codeSteps, proof), slack, patternSeconds, emit: events.emit, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
+    runPipeline(group, { code: withReproduction(codeSteps, proof), slack, patternSeconds, emit: events.emit, monitorChannelId, findOwner: (page) => findOwner(page, { lookupSlackUser }) }),
   );
 
   const onMessage = makeMessageHandler({

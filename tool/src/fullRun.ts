@@ -103,6 +103,8 @@ export interface FullRunDeps {
   /** Posts the three reports; resolves with their ts in order. */
   post(): Promise<string[]>;
   readThread(threadTs: string): Promise<ThreadMessage[]>;
+  /** The tool's own top-level message in the monitor channel posted after this ts, or null. Absent: threads are under the reports. */
+  findMonitorThread?(afterTs: string): Promise<string | null>;
   permalink(ts: string): Promise<string>;
   approveFromThread(threadTs: string): Promise<AutoApproveOutcome>;
   pullMerged(prUrl: string): Promise<boolean>;
@@ -262,6 +264,14 @@ export async function runFullCase(d: FullRunDeps): Promise<FullRunLine> {
   let threadTs: string | null = null;
   let messages: ThreadMessage[] = [];
   for (let round = 0; d.now() - t0 < limit; round++) {
+    const monitorTs: string | null = !threadTs && d.findMonitorThread ? await d.findMonitorThread(firstTs).catch(() => null) : null;
+    if (monitorTs) {
+      threadTs = monitorTs;
+      messages = await d.readThread(monitorTs);
+      if (readHandoff(messages)) break;
+      await d.sleep(2000);
+      continue;
+    }
     const candidates: string[] = threadTs ? [threadTs] : round % 5 === 0 ? posted : [firstTs];
     for (const ts of candidates as string[]) {
       const msgs = await d.readThread(ts);
