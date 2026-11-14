@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact Demo Bank support</title>
+<style>
+  :root { --ink:#1d2433; --muted:#5b6475; --line:#d5d9e2; --bg:#f4f5f8; --accent:#2f5d8a; --bad:#a3282c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width:560px; margin:0 auto; padding:24px 16px 40px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  p.lead { margin:0 0 20px; color:var(--muted); }
+  label { display:block; font-weight:600; margin:14px 0 6px; }
+  label small { font-weight:400; color:var(--muted); }
+  input, select, textarea { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:inherit; }
+  textarea { min-height:130px; resize:vertical; }
+  input[type=file] { padding:8px; }
+  button { margin-top:20px; width:100%; padding:13px; font:inherit; font-weight:600; color:#fff; background:var(--accent); border:0; border-radius:8px; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  .error { color:var(--bad); margin-top:12px; min-height:1.4em; }
+  .done { background:#fff; border:1px solid var(--line); border-radius:12px; padding:24px; font-size:1.15rem; }
+  .brand { font-weight:700; color:var(--accent); letter-spacing:.02em; margin-bottom:18px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">Demo Bank</div>
+  <section id="form-view">
+    <h1>Contact Demo Bank support</h1>
+    <p class="lead">Tell us what went wrong. Our support team reads every message.</p>
+    <form id="f" novalidate>
+      <label for="name">Full name</label>
+      <input id="name" name="name" autocomplete="name" required>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
+      <label for="phone">Phone <small>(optional)</small></label>
+      <input id="phone" name="phone" type="tel" autocomplete="tel">
+      <label for="customerNumber">Customer number <small>(optional, DB-123456)</small></label>
+      <input id="customerNumber" name="customerNumber" placeholder="DB-">
+      <label for="page">Which page</label>
+      <select id="page" name="page" required>
+        <option value="">Choose a page</option>
+        <option value="card">Card</option>
+        <option value="transfers">Transfers</option>
+        <option value="account">Account</option>
+        <option value="other">Something else</option>
+      </select>
+      <label for="text">What happened</label>
+      <textarea id="text" name="text" minlength="10" maxlength="1000" required></textarea>
+      <label for="shot">Screenshot <small>(optional, PNG or JPEG, up to 5 MB)</small></label>
+      <input id="shot" name="shot" type="file" accept="image/png,image/jpeg">
+      <button id="send" type="submit">Send to support</button>
+      <div class="error" id="err" role="alert"></div>
+    </form>
+  </section>
+  <section id="done-view" hidden>
+    <div class="done" id="done-text"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const readFile = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result));
+  r.onerror = () => reject(new Error('The screenshot could not be read'));
+  r.readAsDataURL(file);
+});
+$('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('err').textContent = '';
+  const file = $('shot').files[0];
+  if (file && file.size > 5 * 1024 * 1024) { $('err').textContent = 'The screenshot is larger than 5 MB'; return; }
+  $('send').disabled = true;
+  try {
+    const body = {
+      name: $('name').value, email: $('email').value, phone: $('phone').value,
+      customerNumber: $('customerNumber').value, page: $('page').value, text: $('text').value,
+      lang: navigator.language || 'en',
+    };
+    if (file) body.screenshot = { name: file.name, dataBase64: await readFile(file) };
+    const res = await fetch('/api/tickets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Something went wrong, please try again');
+    $('done-text').textContent = `Thank you, ticket ${data.id} is with our support team.`;
+    $('form-view').hidden = true;
+    $('done-view').hidden = false;
+  } catch (err) {
+    $('err').textContent = err.message;
+  } finally {
+    $('send').disabled = false;
+  }
+});
+</script>
+</body>
+</html>
