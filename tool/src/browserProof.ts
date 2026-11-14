@@ -199,15 +199,18 @@ function readRecords(path: string): Record<string, ReproductionRecord> {
   }
 }
 
+const recordKey = (r: ReproductionRecord) => `${r.channel}/${r.threadTs}`;
+
 async function saveRecord(path: string, rec: ReproductionRecord): Promise<void> {
   const all = readRecords(path);
-  all[rec.groupId] = rec;
+  // Keyed by thread: group ids restart at group-1 with every tool process.
+  all[recordKey(rec)] = rec;
   // Keep the file small: the newest 50 groups.
   const kept = Object.values(all)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     .slice(0, 50);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(Object.fromEntries(kept.map((r) => [r.groupId, r])), null, 2), 'utf8');
+  await writeFile(path, JSON.stringify(Object.fromEntries(kept.map((r) => [recordKey(r), r])), null, 2), 'utf8');
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -339,7 +342,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function proveFixed(press: ApprovePress, groupId: string, deps: ProofDeps): Promise<void> {
   const log = logger(deps);
   const statePath = deps.statePath ?? DEFAULT_REPRODUCTIONS_PATH;
-  const before = readRecords(statePath)[groupId];
+  const records = Object.values(readRecords(statePath));
+  // The press's own thread first; a record for another thread with the same group id is not this run's.
+  const before = press.threadTs ? records.find((r) => r.threadTs === press.threadTs) : records.filter((r) => r.groupId === groupId).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
   if (!before) {
     log(`[proof] no reproduction recorded for ${groupId}; the page is not checked after the merge`);
     return;

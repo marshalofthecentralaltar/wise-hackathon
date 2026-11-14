@@ -314,6 +314,26 @@ describe('the after-fix proof', () => {
     );
   });
 
+  it('a restarted tool reuses group ids: the press reads the record of its own thread', async () => {
+    const slack = new FakeSlack();
+    const counts = [5, 3];
+    const d = proofDeps(slack, {
+      runCheck: async (_f, e) =>
+        e === 'replaced' ? { ...FLICKER_REPRODUCED, result: { ...FLICKER_REPRODUCED.result, card_picture_replacements: counts.shift() } } : FLICKER_STABLE,
+    });
+    const first = group('group-1');
+    const later = { ...group('group-1'), threadTs: '1763090000.000200' };
+    await withReproduction(steps(), d).investigate({ group: first, owner: OWNER, monitoring: MONITORING, commits: [] });
+    await settleProofs(5_000);
+    await withReproduction(steps(), d).investigate({ group: later, owner: OWNER, monitoring: MONITORING, commits: [] });
+    await settleProofs(5_000);
+    const { p, approveDeps } = press('group-1', slack);
+    expect(p.threadTs).toBe(first.threadTs);
+    expect(await approveWithProof(d)(p, approveDeps)).toBe('merged');
+    await settleProofs(5_000);
+    expect(texts(slack).at(-1)).toBe('Deployed. Checked the card page in a browser: the card picture was not replaced in 5 seconds (before the fix: replaced 5 times).');
+  });
+
   it('a press that does not merge starts no proof', async () => {
     const slack = new FakeSlack();
     let calls = 0;
