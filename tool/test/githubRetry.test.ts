@@ -9,7 +9,14 @@ const PATH = 'repos/acme/demo-bank-card-app/commits/0e748ac7c4e36f62503750bafa23
 const TOKEN = 'gho_MARKERtoken0123456789abcdefXYZ';
 const ANSWER = [{ number: 7, title: 'Card limit', body: null, html_url: 'https://github.com/acme/x/pull/7', merged_at: '2026-11-13T10:00:00Z' }];
 
-type Step = 'reject' | number | { status: number; body: string };
+type Step = 'reject' | 'bodyDrop' | number | { status: number; body: string };
+
+/** A 200 whose body read fails the way undici words a dropped connection. */
+function droppedBody(): Response {
+  const res = new Response('', { status: 200 });
+  const cause = Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' });
+  return Object.assign(res, { text: () => Promise.reject(new TypeError('terminated', { cause })) });
+}
 
 /** fetch that plays the steps in order, then answers 200 with ANSWER. */
 function restDeps(steps: Step[], opts: { rejectMessage?: string } = {}) {
@@ -27,6 +34,7 @@ function restDeps(steps: Step[], opts: { rejectMessage?: string } = {}) {
       if (step === 'reject') {
         throw new TypeError(opts.rejectMessage ?? 'fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
       }
+      if (step === 'bodyDrop') return droppedBody();
       if (typeof step === 'number') return new Response(`{"message":"status ${step}"}`, { status: step });
       if (step) return new Response(step.body, { status: step.status });
       return new Response(JSON.stringify(ANSWER), { status: 200 });
@@ -84,6 +92,24 @@ describe('githubRestApi retry: rejected fetch', () => {
     const err = await caught(githubRestApiWith(PATH, s.deps));
     expect(err).toBeInstanceOf(GhError);
     expect(err.message).toBe(`GET ${PATH} failed: fetch failed`);
+    expect(s.calls()).toBe(3);
+    expect(s.sleeps).toEqual([300, 1000]);
+    expect(s.logs).toHaveLength(2);
+  });
+
+  it('the body read fails once (connection dropped mid-body), then answers: 2 requests, the same value', async () => {
+    const s = restDeps(['bodyDrop']);
+    expect(await githubRestApiWith(PATH, s.deps)).toEqual(ANSWER);
+    expect(s.calls()).toBe(2);
+    expect(s.sleeps).toEqual([300]);
+    expect(s.logs).toEqual([`[github] GET ${PATH} failed (attempt 1 of 3): terminated (UND_ERR_SOCKET); trying again`]);
+  });
+
+  it("the body read fails three times: 3 requests, pauses 300 then 1000 ms, a GhError in today's network format", async () => {
+    const s = restDeps(['bodyDrop', 'bodyDrop', 'bodyDrop']);
+    const err = await caught(githubRestApiWith(PATH, s.deps));
+    expect(err).toBeInstanceOf(GhError);
+    expect(err.message).toBe(`GET ${PATH} failed: terminated`);
     expect(s.calls()).toBe(3);
     expect(s.sleeps).toEqual([300, 1000]);
     expect(s.logs).toHaveLength(2);
@@ -296,7 +322,7 @@ describe('the token is in no log line and no error message', () => {
   it('success, retry and final failure, rejected fetch and HTTP errors', async () => {
     const texts: string[] = [];
     const auths: string[] = [];
-    const scenarios: Step[][] = [[], ['reject'], [503, 'reject'], ['reject', 'reject', 'reject'], [502, 502, 502], [401]];
+    const scenarios: Step[][] = [[], ['reject'], [503, 'reject'], ['reject', 'reject', 'reject'], [502, 502, 502], [401], ['bodyDrop', 'bodyDrop', 'bodyDrop']];
     for (const steps of scenarios) {
       const s = restDeps([...steps]);
       try {

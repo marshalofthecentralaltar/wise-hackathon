@@ -38,17 +38,19 @@ export async function githubRestApiWith(path: string, deps: RestApiDeps): Promis
     path,
     async () => {
       let res: Response;
+      let text: string;
       try {
         res = await deps.fetch(`https://api.github.com/${path}`, {
           headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'demo-bank-triage' },
           signal: AbortSignal.timeout(30_000),
         });
+        // A connection that drops while the body is read is the same network failure.
+        text = await res.text();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         const cause = err instanceof Error && err.cause instanceof Error ? ` (${(err.cause as { code?: string }).code ?? err.cause.message})` : '';
         return { ok: false, error: new GhError(redact(`GET ${path} failed: ${message}`, token)), retry: true, reason: `${message}${cause}` };
       }
-      const text = await res.text();
       if (!res.ok) {
         return {
           ok: false,
