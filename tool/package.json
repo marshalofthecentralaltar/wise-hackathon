@@ -20,7 +20,8 @@
     "counted-runs": "tsx scripts/counted-runs.ts",
     "demo-start": "tsx scripts/demo-start.ts",
     "demo-stop": "tsx scripts/demo-stop.ts",
-    "seed-spike": "node ../monitoring/seed-spike.mjs"
+    "seed-spike": "node ../monitoring/seed-spike.mjs",
+    "demo-both": "tsx --import ./src/loadSecrets.ts scripts/post-reports.ts --problem both"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",
