@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Process screen</title>
+<style>
+  :root {
+    --ink: #11161a;
+    --muted: #566068;
+    --faint: #6c757c;
+    --line: #d7dde2;
+    --bg: #f3f5f6;
+    --card: #ffffff;
+    --done: #0d6e38;
+    --run: #8a5600;
+    --fail: #a3231c;
+    --wait: #8b9399;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 19px/1.45 var(--sans);
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 26px 26px 70px; }
+
+  .top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px; padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
+  h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -0.01em; }
+  .sub { margin: 5px 0 0; font: 15px/1.3 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; font-size: 15px; color: var(--muted); }
+  .meta b, .meta code { font-family: var(--mono); font-weight: 600; font-size: 14.5px; color: var(--ink); overflow-wrap: anywhere; }
+  .conn { display: inline-flex; align-items: center; gap: 7px; }
+  .conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wait); }
+  .conn[data-ok="yes"] .dot { background: var(--done); }
+  .conn[data-ok="no"] .dot { background: var(--fail); }
+
+  .note { margin: 12px 0 0; padding: 9px 12px; border: 1px solid #d8c9a8; border-radius: 7px; background: #fdf7e9; color: #5a4300; font-size: 16px; }
+
+  .waiting { padding: 64px 8px 0; }
+  .waiting-line { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -0.01em; }
+  .waiting-sub { margin: 10px 0 0; font-size: 18px; color: var(--muted); }
+
+  main { margin-top: 14px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-left: 7px solid var(--wait); border-radius: 10px; padding: 13px 18px 15px; margin-top: 12px; }
+  .step[data-state="start"] { border-left-color: var(--run); }
+  .step[data-state="done"] { border-left-color: var(--done); }
+  .step[data-state="failed"] { border-left-color: var(--fail); }
+  .step[data-state="waiting"] { background: #fafbfb; border-left-color: #c9cfd4; }
+
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+  .head h2 { margin: 0; font-size: 23px; line-height: 1.2; font-weight: 650; letter-spacing: -0.005em; }
+  .key { font: 13.5px/1.5 var(--mono); color: var(--faint); background: #eef1f3; border: 1px solid #e0e4e7; border-radius: 4px; padding: 0 5px; }
+  .badge { margin-left: 2px; font-size: 14px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--wait); }
+  .badge[data-state="start"] { color: var(--run); }
+  .badge[data-state="done"] { color: var(--done); }
+  .badge[data-state="failed"] { color: var(--fail); }
+  .clock { margin-left: auto; font: 19px/1.2 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+
+  .error { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: #fdf0ef; color: #6f1611; font-size: 16px; overflow-wrap: anywhere; }
+  .error .label { font-family: var(--sans); font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .evidence { display: grid; grid-template-columns: 178px minmax(0, 1fr); gap: 7px 18px; margin: 11px 0 0; }
+  .evidence dt { padding-top: 3px; font-size: 13.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); }
+  .evidence dd { margin: 0; min-width: 0; font-size: 18px; overflow-wrap: anywhere; }
+  .say { margin: 0; }
+  blockquote { margin: 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); font-size: 18px; }
+
+  .mono { font-family: var(--mono); font-size: 16.5px; }
+  code.mono { background: #f1f3f4; border-radius: 4px; padding: 1px 5px; }
+  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre.mono { background: #f7f8f9; border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; font-size: 15.5px; line-height: 1.42; }
+  .time { font-family: var(--mono); font-size: 15.5px; color: var(--muted); }
+  a { color: #0a4f8a; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+
+  ul.plain { list-style: none; margin: 0; padding: 0; }
+  ul.plain > li { padding: 7px 0; border-top: 1px dashed var(--line); }
+  ul.plain > li:first-child { border-top: 0; padding-top: 0; }
+  ul.plain > li:last-child { padding-bottom: 0; }
+
+  .commit-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  .commit-head .sha { font-weight: 700; }
+  .commit-msg { font-size: 17.5px; }
+  .commit-meta { margin-top: 2px; font-size: 15px; color: var(--muted); }
+  .files { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .files code { font-size: 14.5px; background: #eef1f3; border-radius: 4px; padding: 1px 5px; }
+
+  .chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 16px; font-weight: 700; }
+  .chip.sev-low { background: #e5f5ea; color: #0b5c2f; }
+  .chip.sev-high { background: #fbe4e2; color: #8d1a14; }
+
+  .diff { display: block; }
+  .diff-line { display: block; }
+  .diff-add { background: #e6f5ec; }
+  .diff-del { background: #fbe9e7; }
+  .diff-hunk { color: #3c4f8a; }
+  .diff-meta { color: var(--muted); }
+
+  .note-empty { margin: 9px 0 0; font-size: 16px; color: var(--faint); }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 18px 16px 50px; }
+    h1 { font-size: 25px; }
+    .evidence { grid-template-columns: 1fr; gap: 2px; }
+    .evidence dt { padding-top: 8px; }
+    .clock { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>What the tool is doing</h1>
+      <p class="sub" id="file">tool/.state/events.jsonl</p>
+    </div>
+    <div class="meta">
+      <span class="conn" id="conn" data-ok="no"><span class="dot"></span><span id="conn-text">connecting</span></span>
+      <span id="mode"></span>
+      <span>run <b id="run">none yet</b></span>
+      <span id="started"></span>
+      <span id="counts"></span>
+    </div>
+  </header>
+
+  <p class="note" id="skipped" hidden></p>
+  <p class="note" id="truncated" hidden>The file was emptied. Waiting for the first reports of the next run.</p>
+
+  <section class="waiting" id="waiting">
+    <p class="waiting-line">Waiting for the first reports</p>
+    <p class="waiting-sub" id="waiting-sub">The tool writes each step to the events file as it runs.</p>
+  </section>
+
+  <main id="steps" aria-label="Steps of the current run"></main>
+</div>
+
+<script>
+'use strict';
+
+// The order of the issue #20 contract. A step the page does not know still gets a plain row,
+// after these, when its first line arrives.
+var KNOWN = [
+  ['reports', 'Reports'],
+  ['monitoring', 'Monitoring and logs'],
+  ['changes', 'Recent changes'],
+  ['owner', 'Owner'],
+  ['investigation', 'Investigation'],
+  ['verdict', 'Verdict'],
+  ['fix', 'Fix'],
+  ['handoff', 'Handoff'],
+  ['approval', 'Approval'],
+  ['deploy', 'Deploy'],
+  ['proof', 'Proof']
+];
+var LABEL = new Map(KNOWN);
+var ORDER = new Map(KNOWN.map(function (pair, i) { return [pair[0], i]; }));
+
+var els = {
+  file: document.getElementById('file'),
+  conn: document.getElementById('conn'),
+  connText: document.getElementById('conn-text'),
+  mode: document.getElementById('mode'),
+  run: document.getElementById('run'),
+  started: document.getElementById('started'),
+  counts: document.getElementById('counts'),
+  skipped: document.getElementById('skipped'),
+  truncated: document.getElementById('truncated'),
+  waiting: document.getElementById('waiting'),
+  waitingSub: document.getElementById('waiting-sub'),
+  steps: document.getElementById('steps')
+};
+
+var view = {
+  run: null,
+  started: null,
+  steps: new Map(),
+  extras: [],
+  file: '',
+  mode: '',
+  speed: 1,
+  exists: false,
+  skipped: 0,
+  note: null
+};
+var rows = new Map();
+
+function el(tag, cls, text) {
+  var node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function str(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return null;
+}
+
+function yesNo(value) {
+  if (value === true) return 'yes';
+  if (value === false) return 'no';
+  return null;
+}
+
+function numberText(value) {
+  if (typeof value === 'number' && isFinite(value)) return String(value);
+  return str(value);
+}
+
+function secondsText(value) {
+  if (typeof value !== 'number' || !isFinite(value)) return null;
+  return value.toFixed(1) + ' s';
+}
+
+function preciseSeconds(value) {
+  if (typeof value !== 'number' || !isFinite(value)) return str(value);
+  return String(value) + ' s';
+}
+
+function humanize(key) {
+  var text = String(key)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([a-zA-Z])(\d)/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function timeText(iso) {
+  var ms = Date.parse(iso);
+  if (isNaN(ms)) return null;
+  return new Date(ms).toLocaleTimeString('en-GB', { hour12: false });
+}
+
+function dateTimeText(iso) {
+  var ms = Date.parse(iso);
+  if (isNaN(ms)) return null;
+  return new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function timeNode(iso) {
+  if (iso === null || iso === undefined) return null;
+  var text = timeText(iso);
+  if (text === null) return str(iso) === null ? null : el('span', 'time', str(iso));
+  var node = el('span', 'time', text);
+  node.title = String(iso);
+  return node;
+}
+
+function dateTimeNode(iso) {
+  if (iso === null || iso === undefined) return null;
+  var text = dateTimeText(iso);
+  if (text === null) return str(iso) === null ? null : el('span', 'time', str(iso));
+  var node = el('span', 'time', text);
+  node.title = String(iso);
+  return node;
+}
+
+function monoNode(text, cls) {
+  var node = el('code', 'mono' + (cls ? ' ' + cls : ''), text);
+  return node;
+}
+
+function monoBlock(text) {
+  return el('pre', 'mono', text);
+}
+
+function paragraph(text) {
+  return el('p', 'say', text);
+}
+
+function linkNode(url, label) {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null;
+  var node = el('a', null, label || url);
+  node.href = url;
+  node.target = '_blank';
+  node.rel = 'noopener noreferrer';
+  node.title = url;
+  return node;
+}
+
+function listNode(items, render) {
+  var list = el('ul', 'plain');
+  items.forEach(function (item, index) {
+    list.append(render(item, index));
+  });
+  return list;
+}
+
+function filesNode(files) {
+  var list = Array.isArray(files) ? files.filter(function (f) { return typeof f === 'string' && f; }) : [];
+  if (!list.length) return null;
+  var box = el('div', 'files');
+  list.forEach(function (file) { box.append(monoNode(file, 'file')); });
+  return box;
+}
+
+function diffNode(text) {
+  var pre = el('pre', 'diff mono');
+  String(text).split('\n').forEach(function (line) {
+    var cls = 'diff-line';
+    if (line.indexOf('+++') === 0 || line.indexOf('---') === 0 || line.indexOf('diff --git') === 0 || line.indexOf('index ') === 0) cls += ' diff-meta';
+    else if (line.indexOf('@@') === 0) cls += ' diff-hunk';
+    else if (line.charAt(0) === '+') cls += ' diff-add';
+    else if (line.charAt(0) === '-') cls += ' diff-del';
+    pre.append(el('span', cls, line === '' ? ' ' : line));
+  });
+  return pre;
+}
+
+function chipNode(text, cls) {
+  return el('span', 'chip ' + cls, text);
+}
+
+function add(dl, label, value) {
+  if (value === null || value === undefined) return;
+  if (typeof value === 'string' && value.trim() === '') return;
+  dl.append(el('dt', null, label));
+  var dd = el('dd');
+  if (value instanceof Node) dd.append(value);
+  else dd.textContent = String(value);
+  dl.append(dd);
+}
+
+function valueBlock(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    if (value.length > 90) return paragraph(value);
+    return document.createTextNode(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return document.createTextNode(String(value));
+  return monoBlock(JSON.stringify(value, null, 2));
+}
+
+var RENDER = {
+  reports: function (dl, ev) {
+    add(dl, 'Page', str(ev.page));
+    add(dl, 'Summary', ev.summary ? paragraph(ev.summary) : null);
+    var reports = Array.isArray(ev.reports) ? ev.reports : null;
+    if (reports === null) return;
+    if (!reports.length) { add(dl, 'Reports', 'none'); return; }
+    add(dl, 'Reports (' + reports.length + ')', listNode(reports, function (report) {
+      var li = el('li');
+      var when = timeNode(report && report.at);
+      if (when) li.append(when);
+      var text = report && str(report.text);
+      if (text) li.append(document.createTextNode((when ? ' ' : '') + text));
+      return li;
+    }));
+  },
+
+  monitoring: function (dl, ev) {
+    add(dl, 'Summary', ev.summary ? paragraph(ev.summary) : null);
+    add(dl, 'Shows a problem', yesNo(ev.showsProblem));
+    add(dl, 'Source', str(ev.source));
+    add(dl, 'Query', str(ev.query) ? monoBlock(ev.query) : null);
+    add(dl, 'Errors per second', numberText(ev.errorsPerSecond));
+    add(dl, '5xx errors', numberText(ev.errorCount5xx));
+    var alerts = Array.isArray(ev.alertsFiring) ? ev.alertsFiring : null;
+    if (alerts !== null) {
+      add(dl, 'Alerts firing', alerts.length
+        ? listNode(alerts, function (alert) {
+            return el('li', null, typeof alert === 'string' ? alert : JSON.stringify(alert));
+          })
+        : 'none');
+    }
+    add(dl, 'p95 response', preciseSeconds(ev.p95Seconds));
+    add(dl, 'Log lines read', numberText(ev.logLinesRead));
+    add(dl, 'Log errors', numberText(ev.logErrors));
+  },
+
+  changes: function (dl, ev) {
+    add(dl, 'Window', typeof ev.days === 'number' ? ev.days + ' days' : str(ev.days));
+    var commits = Array.isArray(ev.commits) ? ev.commits : null;
+    if (commits === null) return;
+    if (!commits.length) { add(dl, 'Commits weighed', 'none'); return; }
+    add(dl, 'Commits weighed (' + commits.length + ')', listNode(commits, function (commit) {
+      var li = el('li');
+      var head = el('div', 'commit-head');
+      if (commit && str(commit.sha)) head.append(monoNode(commit.sha, 'sha'));
+      if (commit && str(commit.message)) head.append(el('span', 'commit-msg', commit.message));
+      if (head.childNodes.length) li.append(head);
+      var meta = el('div', 'commit-meta');
+      if (commit && str(commit.author)) meta.append(document.createTextNode(commit.author));
+      var when = commit ? dateTimeNode(commit.mergedAt) : null;
+      if (when) {
+        if (meta.childNodes.length) meta.append(document.createTextNode(' \u00b7 '));
+        meta.append(when);
+      }
+      if (meta.childNodes.length) li.append(meta);
+      var files = commit ? filesNode(commit.files) : null;
+      if (files) li.append(files);
+      return li;
+    }));
+  },
+
+  owner: function (dl, ev) {
+    add(dl, 'Code path', str(ev.codePath) ? monoNode(ev.codePath) : null);
+    add(dl, 'Owners line', str(ev.ownersLine) ? monoBlock(ev.ownersLine) : null);
+  },
+
+  investigation: function (dl, ev) {
+    add(dl, 'Found', yesNo(ev.found));
+    var commit = el('span');
+    if (str(ev.commitSha)) commit.append(monoNode(ev.commitSha, 'sha'));
+    if (str(ev.commitAuthor)) {
+      if (commit.childNodes.length) commit.append(document.createTextNode(' by '));
+      commit.append(document.createTextNode(ev.commitAuthor));
+    }
+    add(dl, 'Commit', commit.childNodes.length ? commit : null);
+    var place = [str(ev.file), str(ev.lines)].filter(Boolean).join(':');
+    add(dl, 'File and lines', place ? monoNode(place, 'path') : null);
+    add(dl, 'What is wrong', str(ev.whatIsWrong) ? paragraph(ev.whatIsWrong) : null);
+    add(dl, 'Customer effect', str(ev.customerEffect));
+    add(dl, 'Reverts cleanly', yesNo(ev.revertsCleanly));
+  },
+
+  verdict: function (dl, ev) {
+    var severity = str(ev.severity);
+    add(dl, 'Severity', severity ? chipNode(severity, severity === 'high' ? 'sev-high' : severity === 'low' ? 'sev-low' : '') : null);
+    add(dl, 'Reason', str(ev.reason) ? paragraph(ev.reason) : null);
+    add(dl, 'Decided by', str(ev.decidedBy));
+  },
+
+  fix: function (dl, ev) {
+    add(dl, 'Kind', str(ev.kind));
+    var prNumber = str(ev.prNumber);
+    var pr = linkNode(ev.prUrl, prNumber ? '#' + prNumber : null);
+    if (!pr && prNumber) pr = document.createTextNode('#' + prNumber);
+    add(dl, 'Pull request', pr);
+    add(dl, 'Files changed', filesNode(ev.filesChanged));
+    if (ev.testsPassed === null) add(dl, 'Tests passed', 'not run in the time given');
+    else add(dl, 'Tests passed', yesNo(ev.testsPassed));
+    add(dl, 'Note', str(ev.note) ? paragraph(ev.note) : null);
+    add(dl, 'Diff', str(ev.diff) ? diffNode(ev.diff) : null);
+  },
+
+  handoff: function (dl, ev) {
+    add(dl, 'Sentence for customers', str(ev.sentenceForCustomers) ? el('blockquote', null, ev.sentenceForCustomers) : null);
+    var thread = linkNode(ev.threadUrl, str(ev.threadUrl));
+    add(dl, 'Thread', thread);
+  },
+
+  approval: function (dl, ev) {
+    var by = str(ev.by);
+    add(dl, 'By', by === 'owner' ? 'the owner' : by === 'rehearsal-script' ? 'the rehearsal script' : by);
+    add(dl, 'Pull request', str(ev.prNumber) ? '#' + str(ev.prNumber) : null);
+    add(dl, 'Result', str(ev.result));
+  },
+
+  deploy: function (dl, ev) {
+    add(dl, 'Commit', str(ev.sha) ? monoNode(ev.sha, 'sha') : null);
+    add(dl, 'Seconds', secondsText(ev.seconds));
+    add(dl, 'Watcher saw the redeploy', yesNo(ev.watcher));
+  },
+
+  proof: function (dl, ev) {
+    add(dl, 'Check', str(ev.check) ? monoNode(ev.check) : null);
+    add(dl, 'Pass', yesNo(ev.pass));
+    add(dl, 'Before', valueBlock(ev.before));
+    add(dl, 'After', valueBlock(ev.after));
+    add(dl, 'Summary', str(ev.summary) ? paragraph(ev.summary) : null);
+  }
+};
+
+function generic(dl, ev) {
+  if (ev === null || ev === undefined) return;
+  if (typeof ev !== 'object' || Array.isArray(ev)) {
+    add(dl, 'Evidence', valueBlock(ev));
+    return;
+  }
+  Object.keys(ev).forEach(function (key) {
+    add(dl, humanize(key), valueBlock(ev[key]));
+  });
+}
+
+function stateWord(state) {
+  if (state === 'start') return 'running';
+  if (state === 'done') return 'done';
+  if (state === 'failed') return 'failed';
+  if (state === 'waiting') return 'waiting';
+  return state;
+}
+
+function clockText(step) {
+  if (step.seconds !== null) return secondsText(step.seconds) || '';
+  if (step.state === 'start' && step.startedMs !== null) {
+    var ms = Math.max(0, Date.now() - step.startedMs);
+    return (ms / 1000).toFixed(1) + ' s';
+  }
+  return '';
+}
+
+function fillRow(node, step) {
+  node.dataset.state = step.state;
+  var head = el('div', 'head');
+  head.append(el('h2', null, LABEL.get(step.key) || humanize(step.key)));
+  head.append(el('code', 'key', step.key));
+  var badge = el('span', 'badge', stateWord(step.state));
+  badge.dataset.state = step.state;
+  head.append(badge);
+  head.append(el('span', 'clock', clockText(step)));
+  node.replaceChildren(head);
+
+  if (step.error) {
+    var box = el('p', 'error');
+    box.append(el('span', 'label', 'Failed'));
+    box.append(document.createTextNode(' ' + step.error));
+    node.append(box);
+  }
+
+  if (step.evidence !== null && step.evidence !== undefined) {
+    var dl = el('dl', 'evidence');
+    var render = RENDER[step.key] || generic;
+    render(dl, step.evidence);
+    if (dl.childNodes.length) node.append(dl);
+  } else if (step.state === 'done') {
+    node.append(el('p', 'note-empty', 'No evidence in this line.'));
+  }
+}
+
+function insertInOrder(node, key) {
+  var children = Array.prototype.slice.call(els.steps.children);
+  if (ORDER.has(key)) {
+    var mine = ORDER.get(key);
+    for (var i = 0; i < children.length; i += 1) {
+      var other = children[i];
+      var otherKey = other.dataset.step;
+      if (!ORDER.has(otherKey) || ORDER.get(otherKey) > mine) {
+        els.steps.insertBefore(node, other);
+        return;
+      }
+    }
+  }
+  els.steps.append(node);
+}
+
+function upsertRow(key) {
+  var node = rows.get(key);
+  if (!node) {
+    node = el('section', 'step');
+    node.dataset.step = key;
+    node.setAttribute('role', 'listitem');
+    rows.set(key, node);
+    insertInOrder(node, key);
+  }
+  fillRow(node, view.steps.get(key));
+}
+
+function clearRows() {
+  rowNodes().forEach(function (node) { node.remove(); });
+  rows.clear();
+  view.steps.clear();
+  view.extras = [];
+  els.steps.replaceChildren();
+}
+
+function rowNodes() {
+  return Array.prototype.slice.call(els.steps.children);
+}
+
+function resetRun(runId, at) {
+  clearRows();
+  view.run = runId;
+  view.started = at || null;
+  view.note = null;
+  renderChrome();
+}
+
+function apply(line) {
+  var groupId = String(line.groupId);
+  if (view.run !== groupId) resetRun(groupId, typeof line.at === 'string' ? line.at : null);
+
+  var key = String(line.step);
+  var state = String(line.state);
+  var parsed = typeof line.at === 'string' ? Date.parse(line.at) : NaN;
+  var at = isNaN(parsed) ? null : parsed;
+  var previous = view.steps.get(key);
+  var received = Date.now();
+  // A live line's own time is the start of the clock. A replay's times are old, so the clock
+  // counts from when the line arrived instead: only times close to now are trusted.
+  var trustedStart = at !== null && Math.abs(received - at) <= 120000 ? at : received;
+  var step = {
+    key: key,
+    state: state,
+    seconds: typeof line.seconds === 'number' && isFinite(line.seconds) ? line.seconds : null,
+    evidence: line.evidence === undefined ? null : line.evidence,
+    error: typeof line.error === 'string' && line.error ? line.error : null,
+    at: typeof line.at === 'string' ? line.at : null,
+    startedMs: trustedStart
+  };
+  if (state !== 'start' && previous && previous.startedMs !== null) step.startedMs = previous.startedMs;
+  view.steps.set(key, step);
+  upsertRow(key);
+  renderChrome();
+  tick();
+}
+
+function countStates() {
+  var counts = { start: 0, done: 0, failed: 0, other: 0 };
+  view.steps.forEach(function (step) {
+    if (counts[step.state] === undefined) counts.other += 1;
+    else counts[step.state] += 1;
+  });
+  return counts;
+}
+
+function renderChrome() {
+  var counts = countStates();
+  var parts = [];
+  if (counts.done) parts.push(counts.done + ' done');
+  if (counts.start) parts.push(counts.start + ' running');
+  if (counts.failed) parts.push(counts.failed + ' failed');
+
+  els.file.textContent = view.file || 'tool/.state/events.jsonl';
+  els.mode.textContent = view.mode === 'replay' ? 'replay ' + view.speed + 'x' : view.mode === 'live' ? 'live' : '';
+  els.run.textContent = view.run || 'none yet';
+  var started = view.started ? timeText(view.started) : null;
+  els.started.textContent = started ? 'started ' + started : '';
+  els.counts.textContent = parts.join(', ');
+
+  if (view.skipped > 0) {
+    els.skipped.hidden = false;
+    els.skipped.textContent = 'Skipped ' + view.skipped + (view.skipped === 1 ? ' line' : ' lines') + ' that could not be read. The page kept going.';
+  } else {
+    els.skipped.hidden = true;
+  }
+
+  els.truncated.hidden = view.note !== 'truncated';
+  els.waiting.hidden = view.steps.size > 0;
+  if (view.steps.size === 0) {
+    els.waitingSub.textContent = view.exists
+      ? 'The file is empty. The tool writes each step to it as it runs.'
+      : 'The events file does not exist yet. The tool creates it when a run starts.';
+  }
+}
+
+function tick() {
+  var now = Date.now();
+  view.steps.forEach(function (step, key) {
+    if (step.state !== 'start') return;
+    var node = rows.get(key);
+    if (!node) return;
+    var clock = node.querySelector('.clock');
+    if (!clock) return;
+    clock.textContent = ((Math.max(0, now - step.startedMs)) / 1000).toFixed(1) + ' s';
+  });
+}
+
+setInterval(tick, 100);
+
+function setConnection(ok, text) {
+  els.conn.dataset.ok = ok ? 'yes' : 'no';
+  els.connText.textContent = text;
+}
+
+function handle(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  if (payload.type === 'hello') {
+    view.file = typeof payload.file === 'string' ? payload.file : view.file;
+    view.mode = payload.mode === 'replay' ? 'replay' : 'live';
+    view.speed = typeof payload.speed === 'number' ? payload.speed : 1;
+    view.exists = payload.exists === true;
+    view.skipped = typeof payload.skipped === 'number' ? payload.skipped : 0;
+    clearRows();
+    view.run = null;
+    view.started = null;
+    view.note = null;
+    renderChrome();
+    return;
+  }
+  if (payload.type === 'line') {
+    apply(payload.line || {});
+    return;
+  }
+  if (payload.type === 'status' || payload.type === 'ready') {
+    if (typeof payload.exists === 'boolean') view.exists = payload.exists;
+    if (typeof payload.skipped === 'number') view.skipped = payload.skipped;
+    renderChrome();
+    return;
+  }
+  if (payload.type === 'skipped') {
+    if (typeof payload.count === 'number') view.skipped = payload.count;
+    renderChrome();
+    return;
+  }
+  if (payload.type === 'reset') {
+    clearRows();
+    view.run = null;
+    view.started = null;
+    view.note = 'truncated';
+    renderChrome();
+  }
+}
+
+function connect() {
+  var source = new EventSource('/events');
+  source.onopen = function () { setConnection(true, 'live'); };
+  source.onerror = function () { setConnection(false, 'reconnecting'); };
+  source.onmessage = function (message) {
+    var payload;
+    try {
+      payload = JSON.parse(message.data);
+    } catch (err) {
+      return;
+    }
+    handle(payload);
+  };
+}
+
+// The fallback reads the whole run from the server. It is used only where EventSource is absent.
+function pollSnapshot() {
+  fetch('/api/events?t=' + Date.now(), { cache: 'no-store' })
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
+      view.file = typeof data.file === 'string' ? data.file : view.file;
+      view.mode = data.mode === 'replay' ? 'replay' : 'live';
+      view.speed = typeof data.speed === 'number' ? data.speed : 1;
+      view.exists = data.exists === true;
+      view.skipped = typeof data.skipped === 'number' ? data.skipped : 0;
+      clearRows();
+      view.run = null;
+      view.started = null;
+      (Array.isArray(data.events) ? data.events : []).forEach(apply);
+      renderChrome();
+      setConnection(true, 'live');
+    })
+    .catch(function () { setConnection(false, 'reconnecting'); });
+}
+
+if (typeof EventSource === 'function') connect();
+else setInterval(pollSnapshot, 700);
+
+renderChrome();
+</script>
+</body>
+</html>
