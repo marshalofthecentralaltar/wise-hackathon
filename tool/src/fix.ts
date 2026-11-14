@@ -75,7 +75,8 @@ export interface FixInput {
   /** Called with the model's process id when it starts. */
   onModelSpawn?: (pid: number) => void;
   branchName?: string;
-  title?: string;
+  /** A fixed title, or one made from the model's answer once it exists. */
+  title?: string | ((info: { claudeSummary: string }) => string);
   body?: (info: { filesChanged: string[]; testCmd: string; claudeSummary: string }) => string;
   /** Replaces `gh pr create`; tests pass a stand-in. */
   createPullRequest?: (p: PullRequestRequest) => Promise<PullRequestResult>;
@@ -488,7 +489,7 @@ export async function writeFixPullRequest(input: FixInput): Promise<FixResult> {
   // 5. Commit on a new uniquely named branch and push.
   t0 = performance.now();
   const branch = input.branchName ?? makeBranchName();
-  const title = input.title ?? `Fix: ${firstLine(reportText)}`;
+  const title = typeof input.title === 'function' ? input.title({ claudeSummary }) : (input.title ?? `Fix: ${firstLine(reportText)}`);
   for (const args of [
     ['checkout', '-q', '-b', branch],
     ['add', '-A'],

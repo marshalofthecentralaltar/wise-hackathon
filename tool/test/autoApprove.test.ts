@@ -60,7 +60,11 @@ describe('approveFromThread', () => {
     expect(press.messageTs).toBe('1763050000.000400');
     expect(press.threadTs).toBe(THREAD);
     expect(out).toMatchObject({ pressed: true, result: 'merged', owner: 'U0OWNER01', pr: 9 });
-    expect(h.ghCalls).toEqual([['pr', 'merge', '9', '--repo', 'acme/demo-app', '--merge']]);
+    // The merge, then a note on the pull request that no person pressed (its text says one would).
+    expect(h.ghCalls).toEqual([
+      ['pr', 'merge', '9', '--repo', 'acme/demo-app', '--merge'],
+      ['pr', 'comment', '9', '--repo', 'acme/demo-app', '--body', 'Merged by the rehearsal script on behalf of the owner named in the Slack handoff. No person pressed "Approve fix" for this pull request.'],
+    ]);
     expect(h.slack.updates).toHaveLength(1);
     expect(h.slack.updates[0]!.blocks!.some((b) => b.type === 'actions')).toBe(false);
     const line = h.slack.updates[0]!.blocks!.find((b) => b.block_id === APPROVE_BLOCK_ID) as { text: { text: string } };
