@@ -91,12 +91,12 @@ works; this page uses `C:\wise-build`.
 ```
 mkdir C:\wise-build
 cd /d C:\wise-build
-git clone --branch demo-proven-2026-11-14-d https://github.com/marshalofthecentralaltar/wise-hackathon.git
+git clone --branch demo-proven-2026-11-14-e https://github.com/marshalofthecentralaltar/wise-hackathon.git
 ```
 
 The repository is private: the clone works once step 2 is done with an account that can read it.
 
-`--branch demo-proven-2026-11-14-d` gets the exact build that passed the counted runs, not whatever is newest on
+`--branch demo-proven-2026-11-14-e` gets the exact build that passed the counted runs, not whatever is newest on
 `main`. If `MORNING.md` names a different tag, use that one. Git prints a note about a
 "detached HEAD": that is expected. This build and the card app's `main` belong together: never
 set the laptop up from another branch.
@@ -221,6 +221,31 @@ three tabs (it replaces the small terminal of the runbook's screen). It shows th
 new run clears the page. It answers only on this laptop, not on the venue's network.
 `npm run demo-stop` does **not** stop it: press Ctrl+C in its window. To rehearse it without the
 tool: `node trace\serve.mjs --replay trace\sample-events.jsonl`.
+
+**Optional: Grafana** (new on 14 November). The real Grafana (OSS 13.3.1), showing the card app's
+own numbers from the same Prometheus the tool asks: requests per second by status, the 5xx rate with
+the tool's exact query (a flat line at 0 while the reports arrive), and the 95th percentile response
+time, for `/card` and `/transfers`. It only reads Prometheus; the demo is whole without it. After
+`npm run demo-start -- --with-tool`, in Command Prompt:
+
+```
+cd /d C:\wise-build\wise-hackathon
+node monitoring\grafana\start.mjs
+```
+
+The first start downloads Grafana once (499 MB; 15 s on the build PC, measured), checks its SHA-256
+and unpacks it: about 80 s in all. After that a start takes about 13 s. **Run the first start at home
+the evening before**, not on the venue's network: the download stays in `monitoring\.run\` of this
+folder. It prints `Grafana ready at http://localhost:3100`. Open
+`http://localhost:3100/d/card-and-transfers/card-and-transfers` in place of the Prometheus tab: it
+is Grafana's own screen with its menu, no login. Add `?kiosk` to the address for the panels alone.
+It answers only on this laptop. `npm run demo-stop` does **not** stop it:
+
+```
+node monitoring\grafana\stop.mjs
+```
+
+It ends with `Port 3100 refuses connections`.
 
 **When GitHub does not answer.** The tool tries a GitHub read three times by itself. If the thread
 still says `Stopped while listing recent changes`, or `npm run reset` stops with a connection

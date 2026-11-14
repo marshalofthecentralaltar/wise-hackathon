@@ -115,7 +115,9 @@ function unpack() {
   fs.rmSync(unpackDir, { recursive: true, force: true });
   fs.mkdirSync(unpackDir, { recursive: true });
   say('Unpacking');
-  const tar = spawnSync('tar.exe', ['-xf', path.basename(archivePath), '-C', unpackDir], {
+  // Windows' own bsdtar reads zip files; a GNU tar earlier on PATH (Git Bash) cannot.
+  const windowsTar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+  const tar = spawnSync(fs.existsSync(windowsTar) ? windowsTar : 'tar.exe', ['-xf', path.basename(archivePath), '-C', unpackDir], {
     cwd: path.dirname(archivePath),
     encoding: 'utf8',
     windowsHide: true,
