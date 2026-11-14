@@ -91,12 +91,12 @@ works; this page uses `C:\wise-build`.
 ```
 mkdir C:\wise-build
 cd /d C:\wise-build
-git clone --branch demo-proven-2026-11-14-c https://github.com/marshalofthecentralaltar/wise-hackathon.git
+git clone --branch demo-proven-2026-11-14-d https://github.com/marshalofthecentralaltar/wise-hackathon.git
 ```
 
 The repository is private: the clone works once step 2 is done with an account that can read it.
 
-`--branch demo-proven-2026-11-14-c` gets the exact build that passed the counted runs, not whatever is newest on
+`--branch demo-proven-2026-11-14-d` gets the exact build that passed the counted runs, not whatever is newest on
 `main`. If `MORNING.md` names a different tag, use that one. Git prints a note about a
 "detached HEAD": that is expected. This build and the card app's `main` belong together: never
 set the laptop up from another branch.
@@ -205,6 +205,22 @@ the thread says so in one line.
 query, the commits it weighed, the commit it named, the verdict, the fix's diff), goes to
 `tool\.state\events.jsonl`, one line per step start and finish. Nothing reads it unless the
 process screen is running; deleting it between rehearsals is safe.
+
+**Optional: the process screen** (new on 14 November). A page that shows each step of the tool
+starting and finishing, with its evidence, as the tool writes it. The demo is whole without it:
+it only reads the file above, so if it stops, nothing else does. Start it in a second Command
+Prompt window and leave that window open:
+
+```
+cd /d C:\wise-build\wise-hackathon
+node trace\serve.mjs
+```
+
+Open `http://localhost:3300` in a browser window on the right half of the screen, under the
+three tabs (it replaces the small terminal of the runbook's screen). It shows the newest run; a
+new run clears the page. It answers only on this laptop, not on the venue's network.
+`npm run demo-stop` does **not** stop it: press Ctrl+C in its window. To rehearse it without the
+tool: `node trace\serve.mjs --replay trace\sample-events.jsonl`.
 
 **When GitHub does not answer.** The tool tries a GitHub read three times by itself. If the thread
 still says `Stopped while listing recent changes`, or `npm run reset` stops with a connection
