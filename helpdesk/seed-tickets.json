@@ -87,5 +87,16 @@
     "lang": "en",
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "text": "My transfers page shows the 1,200.00 EUR I paid for rent as 1,20.00 EUR. Is that the amount that actually left my account?"
+  },
+  {
+    "problem": "flicker",
+    "name": "Tom Berg",
+    "email": "tom.berg@example.com",
+    "phone": "",
+    "customerNumber": "",
+    "page": "card",
+    "lang": "en",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "text": "The card picture on my card page keeps flashing, it disappears and comes back about every second. Is something wrong with my card?"
   }
 ]
