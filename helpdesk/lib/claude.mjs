@@ -6,6 +6,8 @@ import { existsSync } from 'node:fs';
 import { win32 as win } from 'node:path';
 
 export const CLAUDE_LIMIT_MS = 20_000;
+/** At most this many claude processes at once, so a burst of tickets does not starve the tool. */
+export const MAX_PARALLEL = 4;
 const MODEL = (process.env.HELPDESK_MODEL ?? '').trim() || 'haiku';
 
 /**
@@ -29,6 +31,41 @@ export function claudeLauncher({ platform = process.platform, env = process.env,
   const found = candidates.find((c) => exists(c));
   return { cmd: found ?? 'claude.exe', prefix: [] };
 }
+
+/**
+ * The child's environment, as tool/src/env.ts builds it: no Anthropic key (Claude Code would
+ * bill it instead of the logged-in plan), no Slack token, and no CLAUDE* variable (they would
+ * mark the child as a nested session). Windows names are compared case-insensitively.
+ */
+export function childEnv(parent = process.env) {
+  const drop = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'GROUPING_ANTHROPIC_KEY', 'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_TEST_BOT_TOKEN']);
+  const out = {};
+  for (const [k, v] of Object.entries(parent)) {
+    const u = k.toUpperCase();
+    if (v === undefined || drop.has(u) || u.startsWith('CLAUDE')) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Ends the process and, on Windows, everything it started (as tool/src/fix.ts killTree does). */
+function killTree(child) {
+  if (process.platform === 'win32' && child.pid) {
+    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    return;
+  }
+  child.kill('SIGKILL');
+}
+
+let cachedLauncher;
+let running = 0;
+const queue = [];
+const acquire = () => (running < MAX_PARALLEL ? (running++, Promise.resolve()) : new Promise((r) => queue.push(r)));
+const release = () => {
+  const next = queue.shift();
+  if (next) next();
+  else running--;
+};
 
 function whereClaude() {
   const r = spawnSync('where', ['claude'], { encoding: 'utf8', windowsHide: true });
@@ -65,18 +102,31 @@ export function extractStructured(stdout) {
   }
 }
 
-/** Runs one question. Resolves {answer} or {error}; never rejects. */
-function ask(prompt, opts, limitMs = CLAUDE_LIMIT_MS) {
+/** Runs one question. Resolves {answer} or {error}; never rejects. The time limit starts when claude starts. */
+async function ask(prompt, opts, limitMs = CLAUDE_LIMIT_MS) {
+  await acquire();
+  try {
+    return await askNow(prompt, opts, limitMs);
+  } finally {
+    release();
+  }
+}
+
+function askNow(prompt, opts, limitMs) {
   return new Promise((resolve) => {
     let child;
     try {
-      const { cmd, prefix } = claudeLauncher();
-      child = spawn(cmd, [...prefix, ...args(opts)], { cwd: opts.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      // The env is read at call time, so CLAUDE_BIN_PATH_FOR_TOOL is taken from this process
+      // before childEnv drops it from the child.
+      cachedLauncher ??= claudeLauncher();
+      const { cmd, prefix } = cachedLauncher;
+      child = spawn(cmd, [...prefix, ...args(opts)], { cwd: opts.cwd, env: childEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       resolve({ error: `claude did not start: ${err.message}` });
       return;
     }
     let out = '';
+    let err = '';
     let done = false;
     const finish = (r) => {
       if (done) return;
@@ -85,16 +135,20 @@ function ask(prompt, opts, limitMs = CLAUDE_LIMIT_MS) {
       resolve(r);
     };
     const timer = setTimeout(() => {
-      child.kill();
+      killTree(child);
       finish({ error: `claude did not answer in ${limitMs / 1000} s`, timedOut: true });
     }, limitMs);
     child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', () => {});
-    child.on('error', (err) => finish({ error: err.code === 'ENOENT' ? 'claude was not found; install it with npm install -g @anthropic-ai/claude-code' : `claude did not start: ${err.message}` }));
+    child.stderr.on('data', (d) => (err = (err + d).slice(-2000)));
+    child.on('error', (e) => {
+      cachedLauncher = undefined; // look for claude again next time
+      finish({ error: e.code === 'ENOENT' ? 'claude was not found; install it with npm install -g @anthropic-ai/claude-code' : `claude did not start: ${e.message}` });
+    });
     child.stdin.on('error', () => {}); // the process may exit before it reads the prompt
     child.on('close', (code) => {
       const answer = extractStructured(out);
-      finish(answer ? { answer } : { error: `claude gave no usable answer (exit ${code})` });
+      const why = err.trim().split(/\r?\n/).filter(Boolean).slice(-1)[0] ?? '';
+      finish(answer ? { answer } : { error: `claude gave no usable answer (exit ${code})${why ? `: ${why.slice(0, 200)}` : ''}` });
     });
     child.stdin.end(prompt);
   });

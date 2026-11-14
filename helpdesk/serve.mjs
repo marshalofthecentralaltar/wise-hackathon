@@ -65,6 +65,15 @@ async function sendToSlack(id, text, removed) {
 }
 
 async function check(id) {
+  try {
+    await checkNow(id);
+  } catch (err) {
+    // Never let a background check take the server down; a person decides instead.
+    update(id, { status: 'Held', heldReason: `The check failed: ${err.message}`, proposedText: store.get(id)?.proposedText ?? '' });
+  }
+}
+
+async function checkNow(id) {
   update(id, { status: 'Checking' });
   const t = store.get(id);
   const r = await processTicket({ ...t, screenshotPath: store.screenshotPath(t) }, deps);

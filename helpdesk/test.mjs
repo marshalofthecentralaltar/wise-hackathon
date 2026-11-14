@@ -300,3 +300,9 @@ test('the server takes a ticket from the form endpoint to a PII-safe Slack text'
     rmSync(state, { recursive: true, force: true });
   }
 });
+
+test('claude gets no Anthropic key, no Slack token and no CLAUDE* variable', async () => {
+  const { childEnv } = await import('./lib/claude.mjs');
+  const env = childEnv({ PATH: '/bin', anthropic_api_key: 'k', SLACK_TEST_BOT_TOKEN: 't', ClaudeCode: '1', CLAUDE_BIN_PATH_FOR_TOOL: 'x', APPDATA: 'a' });
+  assert.deepEqual(env, { PATH: '/bin', APPDATA: 'a' });
+});
