@@ -1,0 +1,47 @@
+# Written by monitoring/grafana/start.mjs from this template into monitoring/.run/grafana.ini.
+# Every setting is a file: nothing on the dashboard is arranged by clicking.
+
+[server]
+http_addr = 127.0.0.1
+http_port = 3100
+domain = localhost
+root_url = http://localhost:3100/
+serve_from_sub_path = false
+enforce_domain = false
+
+# No login screen: anyone who opens http://localhost:3100 views as a Viewer.
+[auth.anonymous]
+enabled = true
+org_name = Main Org.
+org_role = Viewer
+
+[security]
+admin_user = admin
+admin_password = admin
+
+# Nothing leaves the laptop: no usage reports, no update checks.
+[analytics]
+reporting_enabled = false
+check_for_updates = false
+check_for_plugin_updates = false
+feedback_links_enabled = false
+
+[news]
+news_feed_enabled = false
+
+[paths]
+data = {{DATA}}
+logs = {{LOGS}}
+plugins = {{PLUGINS}}
+provisioning = {{PROVISIONING}}
+
+[database]
+type = sqlite3
+path = {{DATA}}/grafana.db
+
+[log]
+mode = console
+level = info
+
+[plugins]
+preinstall_disabled = true

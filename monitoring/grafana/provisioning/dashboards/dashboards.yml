@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# The dashboard is a JSON file beside this one; Grafana loads it at start and reloads it when the
+# file changes. Nothing is placed by hand.
+providers:
+  - name: wise-kit
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+    options:
+      path: {{DASHBOARDS}}
+      foldersFromFilesStructure: false
