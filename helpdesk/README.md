@@ -12,4 +12,8 @@ A stand-in helpdesk (issue #30). Customers write to support through a form; agen
 - A screenshot stays here. Claude describes it in one sentence; that sentence is filtered like the rest.
 - Slack: posted as the "Support Desk" app with `SLACK_TEST_BOT_TOKEN` from the same `secrets.env` as the tool; channel `SUPPORT_CHANNEL_ID`.
 - Tickets and screenshots live in `helpdesk/.state/`, ignored by git. All personal data in `seed-tickets.json` and `seed-screenshots/` is made up.
-- Needs Node 22 and the `claude` command line logged in. No package.
+- Needs Node 22 and the `claude` command line, logged in and new enough for the tool (2.1.325 works; 2.1.191 does not). No package.
+
+## On Windows 11
+
+Use Command Prompt, not PowerShell, as in `docs/STAGE-SETUP.md`. The same commands work. On the first start Windows asks whether Node.js may use the network: click **Allow** (private networks), or phones cannot open the form. The server prints the address phones should use. If the venue network keeps devices apart, use a phone hotspot. `claude.exe` is found from `where claude`, the npm global folder, or Anthropic's installer folder; `CLAUDE_BIN_PATH_FOR_TOOL` overrides it.
