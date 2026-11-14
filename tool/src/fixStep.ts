@@ -11,7 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import { config } from './config.js';
 import { ensureDeps, unlinkDeps } from './deps.js';
-import { ghCreatePullRequest, run, toolGitIdentity, writeFixPullRequest, type FixResult, type PullRequestRequest, type PullRequestResult } from './fix.js';
+import { ghCreatePullRequest, lastCommitDiff, run, toolGitIdentity, writeFixPullRequest, type FixResult, type PullRequestRequest, type PullRequestResult } from './fix.js';
 import type { FixOutcome, FixStepInput } from './types.js';
 import { freshCopy } from './workspace.js';
 
@@ -229,6 +229,7 @@ export async function fixStepWithDetails(input: FixStepInput, opts: FixStepOptio
         fallbackReason: null,
         modelFiles: result.filesChanged,
         commitSha: sha,
+        diff: result.diff ?? null,
       };
     }
     if (result.stage === 'push' || result.stage === 'pr') {
@@ -259,6 +260,7 @@ export async function fixStepWithDetails(input: FixStepInput, opts: FixStepOptio
       });
     }
     const changed = (await git(['diff', '--name-only', 'HEAD~1', 'HEAD'], cwd)).stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const undoDiff = await lastCommitDiff(cwd);
 
     // Tests on the undo branch, when they fit in the time given.
     let testsPassed: boolean | null = null;
@@ -305,6 +307,7 @@ export async function fixStepWithDetails(input: FixStepInput, opts: FixStepOptio
       fallbackReason,
       modelFiles: result.filesChanged ?? [],
       commitSha: sha,
+      diff: undoDiff,
     };
   } finally {
     clearTimeout(budgetTimer);

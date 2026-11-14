@@ -45,6 +45,8 @@ export interface MonitoringFinding {
   unavailable?: boolean;
   /** Count of 5xx responses behind the finding: over the last hour from Prometheus, since the app started from the fallback. */
   errorCount5xx?: number;
+  /** The PromQL sent to Prometheus for the 5xx rate; absent when the reading came from the fallback. */
+  query?: string;
   /** One or two plain sentences for part 3 of the handoff. */
   summary: string;
 }
@@ -122,6 +124,8 @@ export interface FixOutcome {
   /** Why there is no pull request, when kind is 'none' for a low-severity problem. */
   note: string | null;
   seconds: number;
+  /** Unified diff of the pushed change, capped at 4,000 characters; null or absent when there is none. */
+  diff?: string | null;
 }
 
 /** Step 8 input: what the fix step is given. It acts only when verdict.severity is 'low'. */
