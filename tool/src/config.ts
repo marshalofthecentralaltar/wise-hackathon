@@ -9,6 +9,19 @@ const env = (name: string, fallback: string): string => (process.env[name] ?? ''
 export const config = {
   /** Slack channel the reports arrive in, without the #. */
   supportChannel: env('SUPPORT_CHANNEL', 'support'),
+  /**
+   * Channel the tool's own thread goes in, without the #: one top-level message per recognised
+   * pattern, every step in its thread. `off` keeps the thread under the first report instead.
+   */
+  monitorChannel: env('MONITOR_CHANNEL', 'monitor'),
+  /**
+   * Slack user ids tagged in every handoff, any of whom may press "Approve fix", comma separated.
+   * Default: Ralf, Nadim and Roger. `off` leaves the owner from the owners file as the only one.
+   */
+  approvers: env('APPROVERS', 'U0CHQ0RKFS8,U0CJEMEMMT2,U0CJEMFJTS4')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^[UW][A-Z0-9]+$/.test(s)),
   /** Reports in one group before the tool acts. */
   reportThreshold: Number(env('REPORT_THRESHOLD', '3')),
   /** Repositories the product's code lives in, owner/name, comma separated. The first holds the owners file. */

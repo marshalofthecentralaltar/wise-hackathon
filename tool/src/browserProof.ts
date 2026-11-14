@@ -290,7 +290,7 @@ export function fixedLine(page: Page, run: CheckRun, before: ReproductionRecord 
 async function reproduce(group: ReportGroup, check: PageCheck, deps: ProofDeps): Promise<void> {
   const page = group.page as Page;
   const statePath = deps.statePath ?? DEFAULT_REPRODUCTIONS_PATH;
-  const channel = group.reports[0]?.channel ?? '';
+  const channel = group.threadChannel ?? group.reports[0]?.channel ?? '';
   const rec: ReproductionRecord = { groupId: group.id, page, channel, threadTs: group.threadTs, check: check.name, startedAt: new Date().toISOString() };
   safeEmit(deps, { groupId: group.id, step: 'reproduction', state: 'start', evidence: { check: check.name, page } });
   await saveRecord(statePath, rec).catch((err) => logger(deps)(`[proof] could not record the reproduction start: ${String(err)}`));

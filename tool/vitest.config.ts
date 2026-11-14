@@ -7,5 +7,7 @@ export default defineConfig({
     testTimeout: 30_000,
     // beforeAll hooks that build git fixtures timed out at the 10 s default under the same load.
     hookTimeout: 60_000,
+    // Tests name their own owner; the three demo approvers (src/config.ts) are off unless a test sets them.
+    env: { APPROVERS: 'off', MONITOR_CHANNEL: 'off' },
   },
 });

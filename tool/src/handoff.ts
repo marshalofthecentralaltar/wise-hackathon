@@ -26,6 +26,13 @@ export interface ApproveValue {
   /** Slack user id of the owner named in the handoff: the only person whose press merges. */
   owner: string;
   group: string;
+  /** Everyone whose press merges: the owner, then config.approvers. Missing: the owner only. */
+  approvers?: string[];
+}
+
+/** The owner first, then config.approvers, no repeats. Empty when nobody is matched in Slack. */
+export function approversFor(ownerSlackId: string | null, extra: string[] = config.approvers): string[] {
+  return [...new Set([...(ownerSlackId ? [ownerSlackId] : []), ...extra])];
 }
 
 export interface HandoffMessage {
@@ -83,7 +90,8 @@ function ownerLine(h: Handoff): string {
   if (!o.githubLogin) {
     return 'No owners line covers this page, so nobody is tagged. Who owns it? Please answer in this thread.';
   }
-  const who = o.slackUserId ? `<@${o.slackUserId}>` : `${esc(o.githubLogin)} on GitHub (not found in this Slack workspace)`;
+  const tagged = approversFor(o.slackUserId);
+  const who = tagged.length ? tagged.map((id) => `<@${id}>`).join(' ') : `${esc(o.githubLogin)} on GitHub (not found in this Slack workspace)`;
   const from = o.ownersLine ? `, from the owners line ${code(o.ownersLine)}` : '';
   return `Owner: ${who}${from}.`;
 }
@@ -103,7 +111,7 @@ function fixPart(h: Handoff): string {
   const what = f.kind === 'undo' ? 'undoes the commit above' : 'fixes it';
   const files = f.filesChanged.length ? ` It changes ${f.filesChanged.map(code).join(', ')}.` : '';
   const tests = f.testsPassed === true ? ' The tests passed.' : f.testsPassed === false ? ' The tests failed.' : '';
-  const who = h.owner.slackUserId ? ' Only the owner named here can approve it.' : ' There is no "Approve fix" button because nobody in this Slack workspace is matched to the owner. Merge it on GitHub.';
+  const who = approversFor(h.owner.slackUserId).length ? ' Anyone tagged as owner here can approve it.' : ' There is no "Approve fix" button because nobody in this Slack workspace is matched to the owner. Merge it on GitHub.';
   return `*Fix:* ${link(f.prUrl!, label)} ${what}.${files}${tests}${who}`;
 }
 
@@ -131,8 +139,9 @@ export function buildHandoffMessage(h: Handoff): HandoffMessage {
   let approve: ApproveValue | null = null;
   for (const p of parts) {
     blocks.push({ type: 'section', block_id: `handoff_${p.id}`, text: { type: 'mrkdwn', text: p.text.slice(0, 2900) } });
-    if (p.id === 'fix' && h.owner.slackUserId && h.fix.prNumber && h.fix.prUrl) {
-      approve = { repo: h.investigation.repo || h.owner.repo, pr: h.fix.prNumber, owner: h.owner.slackUserId, group: group.id };
+    const approvers = approversFor(h.owner.slackUserId);
+    if (p.id === 'fix' && approvers.length && h.fix.prNumber && h.fix.prUrl) {
+      approve = { repo: h.investigation.repo || h.owner.repo, pr: h.fix.prNumber, owner: approvers[0]!, group: group.id, approvers };
       blocks.push({
         type: 'actions',
         block_id: APPROVE_BLOCK_ID,

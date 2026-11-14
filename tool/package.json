@@ -19,7 +19,8 @@
     "approve-latest": "tsx --import ./src/loadSecrets.ts scripts/approve-latest.ts",
     "counted-runs": "tsx scripts/counted-runs.ts",
     "demo-start": "tsx scripts/demo-start.ts",
-    "demo-stop": "tsx scripts/demo-stop.ts"
+    "demo-stop": "tsx scripts/demo-stop.ts",
+    "seed-spike": "node ../monitoring/seed-spike.mjs"
   },
   "dependencies": {
     "@slack/bolt": "^5.1.0",

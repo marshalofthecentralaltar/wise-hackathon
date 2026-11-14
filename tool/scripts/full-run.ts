@@ -81,6 +81,18 @@ const botClient = new WebClient(botToken);
 const auth = await botClient.auth.test();
 const ownBot = { userId: auth.user_id ?? '', botId: auth.bot_id ?? '' };
 const readThread = slackThreadReader(botClient);
+/** The monitor channel (MONITOR_CHANNEL, by name): the tool's thread is its own message there. */
+const monitorName = (process.env.MONITOR_CHANNEL ?? '').trim() || 'monitor';
+let monitorId: string | undefined;
+if (monitorName.toLowerCase() !== 'off') {
+  for (let cursor: string | undefined, first = true; first || cursor; first = false) {
+    const page = await botClient.conversations.list({ types: 'public_channel', exclude_archived: true, limit: 200, cursor });
+    monitorId = page.channels?.find((c) => c.name === monitorName)?.id ?? monitorId;
+    cursor = monitorId ? undefined : page.response_metadata?.next_cursor || undefined;
+  }
+}
+const monitorThreads = new Set<string>();
+const channelOf = (ts: string) => (monitorId && monitorThreads.has(ts) ? monitorId : channel);
 const slack = webSlackPort(botClient);
 /** The approval this script makes writes its steps to the same events file as the tool. */
 const events = makeRunEvents();
@@ -170,6 +182,17 @@ const deps: FullRunDeps = {
     return { log: toolProcess.log, pid: toolProcess.pid };
   },
   async post() {
+    // The flicker is a request storm: the seeder (monitoring/seed-spike.mjs) makes it visible on
+    // the Grafana panel the thread links to. It stops by itself after 240 s. SEED_SPIKE=off skips it.
+    if (problem === 'flicker' && (process.env.SEED_SPIKE ?? '').toLowerCase() !== 'off') {
+      try {
+        const seeder = spawn(process.execPath, [fileURLToPath(new URL('../../monitoring/seed-spike.mjs', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true });
+        seeder.unref();
+        log(`started the Grafana spike seeder (pid ${seeder.pid ?? '?'}, 240 s)`);
+      } catch (err) {
+        log(`the Grafana spike seeder did not start: ${String(err)}`);
+      }
+    }
     const texts = pickReports(problem);
     const handled: Promise<void>[] = [];
     const client = via === 'slack' ? new WebClient(testToken) : botClient;
@@ -187,9 +210,20 @@ const deps: FullRunDeps = {
     void Promise.all(handled);
     return out;
   },
-  readThread: (ts) => readThread(channel, ts),
-  permalink: (ts) => slack.getPermalink(channel, ts),
-  approveFromThread: (ts) => approveFromThread({ channel, threadTs: ts, read: readThread, slack, approve: approveWithProof({ slack, log, emit: events.emitBare }) }),
+  readThread: (ts) => readThread(channelOf(ts), ts),
+  ...(monitorId
+    ? {
+        async findMonitorThread(afterTs: string) {
+          const h = await botClient.conversations.history({ channel: monitorId!, oldest: afterTs, limit: 50 });
+          const mine = (h.messages ?? []).filter((m) => (m.user === ownBot.userId || (!!m.bot_id && m.bot_id === ownBot.botId)) && (!m.thread_ts || m.thread_ts === m.ts));
+          const ts = mine.map((m) => String(m.ts)).sort()[0];
+          if (ts) monitorThreads.add(ts);
+          return ts ?? null;
+        },
+      }
+    : {}),
+  permalink: (ts) => slack.getPermalink(channelOf(ts), ts),
+  approveFromThread: (ts) => approveFromThread({ channel: channelOf(ts), threadTs: ts, read: readThread, slack, approve: approveWithProof({ slack, log, emit: events.emitBare }) }),
   async pullMerged(prUrl) {
     const n = /\/pull\/(\d+)/.exec(prUrl)?.[1] ?? '';
     const r = await spawnTool('gh', ['pr', 'view', n, '--repo', repo, '--json', 'state,mergedAt'], { timeoutMs: 60_000 });

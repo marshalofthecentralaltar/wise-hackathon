@@ -26,6 +26,8 @@ export interface ReportGroup {
   reports: Report[];
   /** ts of the first report; the tool's thread hangs off this message. */
   threadTs: string;
+  /** Set when the tool's thread is its own message in the monitor channel: that channel's id (threadTs is then that message). */
+  threadChannel?: string;
 }
 
 /** Step 3. What monitoring and the logs showed for the page. "Nothing" is a normal result. */

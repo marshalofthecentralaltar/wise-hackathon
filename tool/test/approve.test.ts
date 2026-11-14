@@ -53,7 +53,7 @@ describe('Approve fix', () => {
     expect(calls).toEqual([]);
     expect(slack.updates).toEqual([]);
     expect(slack.ephemerals).toEqual([
-      { channel: 'C0SUPPORT', user: 'U0SOMEONE', threadTs: '1763050000.000100', text: 'Only the owner named in this handoff can approve the fix. Nothing was merged.' },
+      { channel: 'C0SUPPORT', user: 'U0SOMEONE', threadTs: '1763050000.000100', text: 'Only the people tagged as owner in this handoff can approve the fix. Nothing was merged.' },
     ]);
     expect(slack.posted).toEqual([]);
   });
