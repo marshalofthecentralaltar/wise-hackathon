@@ -31,7 +31,7 @@ export const TOOL_BRANCH_PREFIXES = [TOOL_BRANCH_PREFIX, 'fix/report-'] as const
 export const CARD_APP_REPO = 'marshalofthecentralaltar/demo-bank-card-app';
 
 /** The commit `main` of the card app stands at with both problems planted: the merge of the restyle (card app #28, 14 Nov) on top of ee38468 (13 Nov). */
-export const PLANTED_MAIN_SHA = 'bd6fd24440f1ee4a62dc549d925f08d531f8de9c';
+export const PLANTED_MAIN_SHA = 'a2215445f9924ef8bb6c7c419f0acaf1a5760b86';
 
 /** Where `main` should stand. Override with RESET_EXPECTED_MAIN (a full or short sha). */
 export const PLANTED_MAIN = (process.env.RESET_EXPECTED_MAIN ?? '').trim() || PLANTED_MAIN_SHA;
